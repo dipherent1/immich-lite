@@ -1,0 +1,20 @@
+14:18:43 [INFO] lite_ml_service: Using PostgreSQL storage
+14:18:43 [ERROR] lite_ml_service: Failed to connect to PostgreSQL at postgresql://postgres:postgres@localhost:5432/immich?sslmode=prefer
+Traceback (most recent call last):
+  File "C:\Users\SHO\Desktop\Projects\immich-app\immich-lite\lite_ml_service\main.py", line 37, in create_repository
+    return PostgresEmbeddingRepository(database_url)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SHO\Desktop\Projects\immich-app\immich-lite\lite_ml_service\infrastructure\postgres_storage.py", line 22, in __init__
+    self._connect()
+  File "C:\Users\SHO\Desktop\Projects\immich-app\immich-lite\lite_ml_service\infrastructure\postgres_storage.py", line 28, in _connect
+    register_vector(self._conn)
+  File "C:\Users\SHO\Desktop\Projects\immich-app\immich-lite\.venv\Lib\site-packages\pgvector\psycopg2\register.py", line 19, in register_vector
+    raise psycopg2.ProgrammingError('vector type not found in the database')
+psycopg2.ProgrammingError: vector type not found in the database
+14:18:43 [WARNING] lite_ml_service: Falling back to JSON file storage
+14:18:43 [INFO] lite_ml_service: Using JSON file storage: embeddings.json
+14:18:43 [INFO] lite_ml_service: Starting API on 0.0.0.0:8000 (embeddings=embeddings.json, output=output)
+INFO:     Started server process [18956]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
