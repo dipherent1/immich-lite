@@ -12,6 +12,7 @@ from lite_ml_service.domain.entities import IndexerConfig, MatcherConfig
 from lite_ml_service.domain.interfaces import EmbeddingRepository
 from lite_ml_service.infrastructure.embedding import InsightFaceEmbeddingProvider
 from lite_ml_service.infrastructure.file_io import LocalFileService
+from lite_ml_service.infrastructure.qdrant_storage import QdrantEmbeddingRepository
 from lite_ml_service.infrastructure.storage import JsonEmbeddingRepository
 from lite_ml_service.presentation.api import create_app
 
@@ -26,19 +27,16 @@ load_dotenv()
 
 
 def create_repository(embeddings_path: str) -> EmbeddingRepository:
-    database_url = os.environ.get("DATABASE_URL")
-    if database_url:
+    qdrant_url = os.environ.get("QDRANT_URL")
+    if qdrant_url:
         try:
-            from lite_ml_service.infrastructure.postgres_storage import (
-                PostgresEmbeddingRepository,
+            logger.info("Using Qdrant storage: %s", qdrant_url)
+            return QdrantEmbeddingRepository(
+                url=qdrant_url,
+                collection_name=os.environ.get("QDRANT_COLLECTION_NAME", "face_embeddings"),
             )
-
-            logger.info("Using PostgreSQL storage")
-            return PostgresEmbeddingRepository(database_url)
         except Exception:
-            logger.exception(
-                "Failed to connect to PostgreSQL at %s", database_url, exc_info=True
-            )
+            logger.exception("Failed to connect to Qdrant at %s", qdrant_url, exc_info=True)
             logger.warning("Falling back to JSON file storage")
 
     logger.info("Using JSON file storage: %s", embeddings_path)
@@ -46,8 +44,9 @@ def create_repository(embeddings_path: str) -> EmbeddingRepository:
 
 
 def build_indexer(source_dir: str, embeddings_path: str, threshold: float = 0.5) -> IndexerService:
+    model_name = os.environ.get("MODEL_NAME", "buffalo_l")
     return IndexerService(
-        embedding_provider=InsightFaceEmbeddingProvider(detection_threshold=threshold),
+        embedding_provider=InsightFaceEmbeddingProvider(model_name=model_name, detection_threshold=threshold),
         repository=create_repository(embeddings_path),
         file_service=LocalFileService(),
         config=IndexerConfig(
@@ -64,7 +63,8 @@ def build_matcher(
     similarity_threshold: float = 0.5,
     detection_threshold: float = 0.5,
 ) -> tuple[MatcherService, object]:
-    embedder = InsightFaceEmbeddingProvider(detection_threshold=detection_threshold)
+    model_name = os.environ.get("MODEL_NAME", "buffalo_l")
+    embedder = InsightFaceEmbeddingProvider(model_name=model_name, detection_threshold=detection_threshold)
     repo = create_repository(embeddings_path)
     file_svc = LocalFileService()
 

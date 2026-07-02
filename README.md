@@ -8,7 +8,8 @@ Clean Architecture with four layers:
 
 ```
 immich-lite/
-├── .env                        # DATABASE_URL for PostgreSQL (optional)
+├── .env                        # Qdrant connection config + model selection
+├── docker-compose.yml          # Qdrant vector database service
 ├── run_indexer.py               # CLI entry point for indexing
 ├── run_api.py                   # Entry point for the API server
 ├── .venv/                       # Python 3.11 virtual environment
@@ -20,8 +21,8 @@ immich-lite/
     │   └── services.py          # IndexerService, MatcherService (centroid matching)
     ├── infrastructure/          # Concrete implementations
     │   ├── embedding.py         # InsightFace detection + ArcFace ONNX embedding
-    │   ├── storage.py           # JSON file repository (cosine similarity search)
-    │   ├── postgres_storage.py  # pgvector repository (PostgreSQL)
+    │   ├── qdrant_storage.py    # Qdrant vector DB repository (cosine distance)
+    │   ├── storage.py           # JSON file fallback repository
     │   └── file_io.py           # Local file read/copy/save
     └── presentation/            # API layer
         ├── api.py               # FastAPI app (match, match-by-path, Swagger)
@@ -34,7 +35,7 @@ Swapping out storage or the embedding backend only requires implementing the cor
 
 - Python 3.11
 - ~16 MB disk for the ONNX model (downloaded on first use from HuggingFace)
-- PostgreSQL 14+ with `vector` extension (optional — falls back to JSON file)
+- [Docker](https://docs.docker.com/engine/install/) for the Qdrant vector database
 
 ## Setup
 
@@ -47,15 +48,34 @@ python -m venv .venv
 
 (Dependencies are already installed in the shipped `.venv`.)
 
-### PostgreSQL storage (optional)
+### Qdrant vector database
 
-Create a `.env` file at the project root with your connection string:
+Start Qdrant via Docker Compose:
 
+```bash
+docker compose up -d
 ```
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/immich?sslmode=prefer
+
+This runs Qdrant on port 6333 (REST) and 6334 (gRPC) with a persistent named volume.
+
+### Configuration
+
+Create a `.env` file at the project root:
+
+```env
+QDRANT_URL=http://localhost:6333
+QDRANT_COLLECTION_NAME=face_embeddings
+MODEL_NAME=buffalo_l
 ```
 
-On startup the service checks for `DATABASE_URL`. If set and reachable, it uses pgvector; otherwise it falls back to JSON file storage. The table and ivfflat index are created automatically on first use.
+| Variable                  | Default                | Description                             |
+| ------------------------- | ---------------------- | --------------------------------------- |
+| `QDRANT_URL`              | `http://localhost:6333`| Qdrant server REST endpoint             |
+| `QDRANT_API_KEY`          | _(none)_               | Optional API key for authenticated Qdrant|
+| `QDRANT_COLLECTION_NAME`  | `face_embeddings`      | Qdrant collection name                  |
+| `MODEL_NAME`              | `buffalo_l`            | InsightFace model (`buffalo_s` or `buffalo_l`) |
+
+On startup the service checks for `QDRANT_URL`. If set and reachable, it uses Qdrant; otherwise it falls back to JSON file storage (`embeddings.json`). The collection with COSINE distance and 512-dim vectors is created automatically.
 
 ## Usage
 
@@ -65,11 +85,11 @@ On startup the service checks for `DATABASE_URL`. If set and reachable, it uses 
 python run_indexer.py C:\Users\SHO\Pictures\immich
 ```
 
-This scans `path\to\photos` recursively for images, detects faces, extracts 512-dim ArcFace embeddings, and saves them to `embeddings.json`.
+This scans `path\to\photos` recursively for images, detects faces, extracts 512-dim ArcFace embeddings, and stores them in Qdrant (or `embeddings.json` as fallback).
 
 | Flag                  | Default           | Description                         |
 | --------------------- | ----------------- | ----------------------------------- |
-| `--embeddings <path>` | `embeddings.json` | Where to store the embedding index  |
+| `--embeddings <path>` | `embeddings.json` | Fallback path when Qdrant is unused |
 | `--threshold <float>` | `0.5`             | Face detection confidence threshold |
 
 ### 2. Start the matching API
@@ -80,7 +100,7 @@ python run_api.py
 
 | Flag                  | Default           | Description                             |
 | --------------------- | ----------------- | --------------------------------------- |
-| `--embeddings <path>` | `embeddings.json` | Path to the pre-built embedding index   |
+| `--embeddings <path>` | `embeddings.json` | Fallback path when Qdrant is unused     |
 | `--output <dir>`      | `output`          | Root directory for match results        |
 | `--threshold <float>` | `0.5`             | Cosine similarity threshold for matches |
 | `--host <host>`       | `0.0.0.0`         | Bind address                            |
@@ -156,16 +176,16 @@ Captures are automatically sent to the `/api/match` endpoint for centroid matchi
 
 ## Model
 
-Uses **insightface** model zoo with ONNX Runtime. The default model is `buffalo_s`:
+Uses **insightface** model zoo with ONNX Runtime. The default model is `buffalo_l` (configurable via `MODEL_NAME` env var):
 
 - **RetinaFace** for face detection (localized ONNX model)
 - **ArcFace** (W600K-R50) for 512-dimensional face embeddings
 
-Models are downloaded automatically on first use from HuggingFace (`immich-app/buffalo_s`) to `~/.cache/immich_ml/buffalo_s/`. You can also place a pre-downloaded `buffalo_s.zip` at `C:\Users\SHO\Downloads\Setups/buffalo_s.zip` to skip the download.
+Models are downloaded automatically on first use from HuggingFace (`immich-app/buffalo_l`) to `~/.cache/immich_ml/buffalo_l/`. You can also place a pre-downloaded `{model_name}.zip` at `C:\Users\SHO\Downloads\Setups/{model_name}.zip` to skip the download.
 
 ## Extending
 
-- **Storage**: Implement `EmbeddingRepository` to use a vector DB (e.g., pgvector, Chroma, Qdrant)
+- **Storage**: Implement `EmbeddingRepository` to use a different vector DB
 - **Multi-face centroid**: Upload multiple images — embeddings are averaged into a centroid for more robust matching
-- **Model**: Change `model_name` in `InsightFaceEmbeddingProvider` to use `buffalo_l` (more accurate, slower)
+- **Model**: Set `MODEL_NAME=buffalo_s` in `.env` for faster but less accurate inference
 - **Embedding backend**: Implement `EmbeddingProvider` to swap in a different model

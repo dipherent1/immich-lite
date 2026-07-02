@@ -134,8 +134,7 @@ class InsightFaceEmbeddingProvider(EmbeddingProvider):
         if len(bboxes) == 0:
             return []
 
-        cropped_faces = [self._norm_crop(img_array, lm) for lm in landmarks]
-        embeddings = self._recognizer.get_feat(cropped_faces)
+        embeddings = np.array([self._recognizer.get_feat(self._norm_crop(img_array, lm))[0] for lm in landmarks])
 
         results: list[FaceEmbedding] = []
         for i, bbox in enumerate(bboxes):

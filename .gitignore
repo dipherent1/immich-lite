@@ -5,3 +5,4 @@ __pycache__/
 *.pyo
 embeddings.json
 output/
+qdrant_storage/
