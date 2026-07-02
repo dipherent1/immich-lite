@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Face Scan</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f0f; color: #fff; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+  h1 { margin-bottom: 8px; font-weight: 500; font-size: 1.4rem; }
+  .subtitle { color: #888; font-size: 0.85rem; margin-bottom: 20px; }
+  .step-indicator { display: flex; gap: 12px; margin-bottom: 20px; }
+  .step { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; font-weight: 600; border: 2px solid #333; color: #555; transition: all .2s; }
+  .step.active { border-color: #3b82f6; color: #3b82f6; background: rgba(59,130,246,0.1); }
+  .step.done { border-color: #22c55e; color: #22c55e; background: rgba(34,197,94,0.1); }
+  .video-container { position: relative; width: 640px; max-width: 100%; border-radius: 16px; overflow: hidden; background: #1a1a1a; }
+  video { width: 100%; display: block; transform: scaleX(-1); }
+  .guide { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); backdrop-filter: blur(8px); padding: 10px 24px; border-radius: 24px; font-size: 1.1rem; font-weight: 500; white-space: nowrap; }
+  .controls { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; justify-content: center; }
+  button { padding: 10px 24px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 500; cursor: pointer; transition: all .15s; background: #2a2a2a; color: #fff; }
+  button:hover { transform: translateY(-1px); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+  button.primary { background: #3b82f6; }
+  button.primary:hover { background: #2563eb; }
+  button.success { background: #22c55e; }
+  button.success:hover { background: #16a34a; }
+  button.danger { background: #ef4444; }
+  .previews { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; justify-content: center; }
+  .preview-card { background: #1a1a1a; border-radius: 12px; padding: 8px; text-align: center; width: 140px; }
+  .preview-card img { width: 100%; height: 100px; object-fit: cover; border-radius: 8px; display: block; }
+  .preview-card .label { margin-top: 6px; font-size: 0.8rem; color: #888; }
+  .preview-card.captured { border: 2px solid #22c55e; }
+  .preview-card .check { display: none; }
+  .preview-card.captured .check { display: inline; }
+  .name-input { margin-top: 16px; display: flex; gap: 8px; align-items: center; }
+  .name-input label { font-size: 0.9rem; color: #aaa; }
+  .name-input input { padding: 10px 14px; border-radius: 10px; border: 1px solid #333; background: #1a1a1a; color: #fff; font-size: 0.95rem; width: 200px; outline: none; }
+  .name-input input:focus { border-color: #3b82f6; }
+  .results { margin-top: 20px; width: 640px; max-width: 100%; }
+  .results h2 { font-size: 1rem; color: #888; margin-bottom: 8px; }
+  .match-item { background: #1a1a1a; border-radius: 10px; padding: 12px 16px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
+  .match-item .sim { color: #22c55e; font-weight: 600; }
+  .match-item .path { color: #aaa; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%; }
+  .status { margin-top: 12px; font-size: 0.85rem; color: #888; }
+  .error { color: #ef4444; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+  <h1>Face Scan</h1>
+  <p class="subtitle">Capture your face from 3 angles for accurate matching</p>
+
+  <div class="step-indicator">
+    <div class="step active" id="step-front">1</div>
+    <div class="step" id="step-left">2</div>
+    <div class="step" id="step-right">3</div>
+  </div>
+
+  <div class="video-container">
+    <video id="video" autoplay playsinline></video>
+    <div class="guide" id="guide-text">Face the camera</div>
+  </div>
+
+  <div class="controls">
+    <button id="btn-capture" class="primary">Capture</button>
+    <button id="btn-reset" class="danger" disabled>Reset</button>
+  </div>
+
+  <div class="previews" id="previews"></div>
+
+  <div class="name-input">
+    <label for="name">Name:</label>
+    <input type="text" id="name" placeholder="e.g. dagi">
+  </div>
+
+  <div class="controls" style="margin-top:12px">
+    <button id="btn-submit" class="success" disabled>Match Faces</button>
+  </div>
+
+  <div class="results hidden" id="results">
+    <h2>Matches</h2>
+    <div id="match-list"></div>
+    <div class="status" id="status-text"></div>
+  </div>
+
+  <canvas id="canvas" class="hidden"></canvas>
+
+<script>
+const POSES = [
+  { id: 'front', text: 'Face the camera', next: 'Turn head slightly left' },
+  { id: 'left', text: 'Turn head slightly left', next: 'Turn head slightly right' },
+  { id: 'right', text: 'Turn head slightly right', next: null },
+];
+
+let currentPose = 0;
+const captures = {};
+
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const guideText = document.getElementById('guide-text');
+const btnCapture = document.getElementById('btn-capture');
+const btnReset = document.getElementById('btn-reset');
+const btnSubmit = document.getElementById('btn-submit');
+const previews = document.getElementById('previews');
+const results = document.getElementById('results');
+const matchList = document.getElementById('match-list');
+const statusText = document.getElementById('status-text');
+const nameInput = document.getElementById('name');
+
+async function init() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } });
+    video.srcObject = stream;
+  } catch (e) {
+    guideText.textContent = 'Camera access denied. Please allow camera access.';
+    guideText.classList.add('error');
+    btnCapture.disabled = true;
+  }
+}
+
+function capture() {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.save();
+  ctx.scale(-1, 1);
+  ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+  ctx.restore();
+
+  const pose = POSES[currentPose];
+  captures[pose.id] = canvas.toDataURL('image/jpeg', 0.9);
+
+  const card = document.createElement('div');
+  card.className = 'preview-card captured';
+  card.id = `preview-${pose.id}`;
+  card.innerHTML = `<img src="${captures[pose.id]}" alt="${pose.id}"><div class="label"><span class="check">✓ </span>${pose.id}</div>`;
+  previews.appendChild(card);
+
+  if (pose.next) {
+    currentPose++;
+    document.getElementById(`step-${pose.id}`).classList.remove('active');
+    document.getElementById(`step-${pose.id}`).classList.add('done');
+    document.getElementById(`step-${POSES[currentPose].id}`).classList.add('active');
+    guideText.textContent = pose.next;
+    btnCapture.disabled = false;
+  } else {
+    document.getElementById(`step-${pose.id}`).classList.remove('active');
+    document.getElementById(`step-${pose.id}`).classList.add('done');
+    guideText.textContent = 'All captures done!';
+    btnCapture.disabled = true;
+    btnSubmit.disabled = !nameInput.value.trim();
+  }
+}
+
+async function submitMatch() {
+  const name = nameInput.value.trim();
+  if (!name) {
+    statusText.textContent = 'Please enter a name';
+    statusText.classList.add('error');
+    return;
+  }
+
+  btnSubmit.disabled = true;
+  btnSubmit.textContent = 'Matching...';
+  results.classList.remove('hidden');
+  matchList.innerHTML = '';
+  statusText.textContent = 'Processing...';
+
+  const formData = new FormData();
+  const entries = Object.entries(captures);
+  entries.forEach(([poseId, dataUrl], i) => {
+    const blob = dataURLtoBlob(dataUrl);
+    formData.append(`file${i + 1}`, blob, `${poseId}.jpg`);
+  });
+  formData.append('name', name);
+
+  try {
+    const res = await fetch('/api/match', { method: 'POST', body: formData });
+    const data = await res.json();
+
+    if (data.error) {
+      statusText.textContent = data.error;
+      statusText.classList.add('error');
+      btnSubmit.disabled = false;
+      btnSubmit.textContent = 'Match Faces';
+      return;
+    }
+
+    matchList.innerHTML = '';
+    data.matches.forEach(m => {
+      const div = document.createElement('div');
+      div.className = 'match-item';
+      div.innerHTML = `<span class="path">${m.image_path.split('\\').pop()}</span><span class="sim">${(m.similarity * 100).toFixed(1)}%</span>`;
+      matchList.appendChild(div);
+    });
+
+    statusText.textContent = `${data.matched_count} match(es) found`;
+    statusText.classList.remove('error');
+  } catch (e) {
+    statusText.textContent = `Error: ${e.message}`;
+    statusText.classList.add('error');
+  }
+
+  btnSubmit.disabled = false;
+  btnSubmit.textContent = 'Match Faces';
+}
+
+function resetAll() {
+  currentPose = 0;
+  Object.keys(captures).forEach(k => delete captures[k]);
+  previews.innerHTML = '';
+  document.getElementById('step-front').className = 'step active';
+  document.getElementById('step-left').className = 'step';
+  document.getElementById('step-right').className = 'step';
+  guideText.textContent = 'Face the camera';
+  guideText.classList.remove('error');
+  btnCapture.disabled = false;
+  btnSubmit.disabled = true;
+  results.classList.add('hidden');
+  matchList.innerHTML = '';
+  statusText.textContent = '';
+}
+
+function dataURLtoBlob(dataUrl) {
+  const parts = dataUrl.split(',');
+  const mime = parts[0].match(/:(.*?);/)[1];
+  const bytes = atob(parts[1]);
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+btnCapture.addEventListener('click', capture);
+btnReset.addEventListener('click', resetAll);
+btnSubmit.addEventListener('click', submitMatch);
+nameInput.addEventListener('input', () => {
+  btnSubmit.disabled = Object.keys(captures).length < 3 || !nameInput.value.trim();
+});
+
+init();
+</script>
+</body>
+</html>
