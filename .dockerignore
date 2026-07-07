@@ -1,0 +1,12 @@
+.venv/
+.git/
+__pycache__/
+*.pyc
+*.pyo
+embeddings.json
+output/
+qdrant_storage/
+.env
+.venv
+*.egg-info/
+.vscode/

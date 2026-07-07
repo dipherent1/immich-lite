@@ -3,12 +3,24 @@ services:
     image: qdrant/qdrant:latest
     container_name: immich-qdrant
     ports:
-      - "${QDRANT_PORT:-6333}:6333"
-      - "${QDRANT_GRPC_PORT:-6334}:6334"
+      - "6333:6333"
+      - "6334:6334"
     volumes:
       - qdrant_storage:/qdrant/storage
+    restart: unless-stopped
+
+  app:
+    build: .
+    container_name: immich-lite-app
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./output:/app/output
+      - ./config.yml:/app/config.yml
     environment:
-      - QDRANT__SERVICE__GRPC_PORT=${QDRANT_GRPC_PORT:-6334}
+      - QDRANT_URL=http://qdrant:6333
+    depends_on:
+      - qdrant
     restart: unless-stopped
 
 volumes:

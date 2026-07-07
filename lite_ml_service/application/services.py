@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -98,6 +99,8 @@ class MatcherService:
 
         match_results.sort(key=lambda r: r["similarity"], reverse=True)
 
+        zip_path = self._create_zip(matches_dir, name, source_path)
+
         logger.info(
             "Matched %d images for '%s' (threshold=%.2f)",
             len(match_results),
@@ -108,9 +111,23 @@ class MatcherService:
         return {
             "name": name,
             "source_image": source_path,
+            "zip_file": zip_path,
             "matches": match_results,
             "matched_count": len(match_results),
         }
+
+    def _create_zip(self, matches_dir: Path, name: str, source_path: str) -> str:
+        zip_path = str(matches_dir.parent / f"{name}.zip")
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.write(source_path, f"source/source.jpg")
+            for m in matches_dir.iterdir():
+                if m.is_file() and m.suffix.lower() in {
+                    ".jpg", ".jpeg", ".png", ".webp", ".bmp",
+                    ".heic", ".heif", ".tiff", ".tif", ".gif", ".avif",
+                }:
+                    zf.write(str(m), f"matches/{m.name}")
+        logger.info("Created zip: %s", zip_path)
+        return zip_path
 
     def match(self, image_bytes: bytes, name: str) -> dict:
         output_dir = self._config.output_root / name

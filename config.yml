@@ -1,0 +1,6 @@
+model_name: buffalo_l
+output_root: output
+qdrant_collection_name: face_embeddings
+
+image_paths:
+  - "C:\\Users\\SHO\\Pictures\\D-days\\50-days"

@@ -9,7 +9,8 @@ Clean Architecture with four layers:
 ```
 immich-lite/
 ├── .env                        # Qdrant connection config + model selection
-├── docker-compose.yml          # Qdrant vector database service
+├── docker-compose.yml          # Qdrant + app services
+├── Dockerfile                  # Python app container
 ├── run_indexer.py               # CLI entry point for indexing
 ├── run_api.py                   # Entry point for the API server
 ├── .venv/                       # Python 3.11 virtual environment
@@ -18,14 +19,14 @@ immich-lite/
     │   ├── entities.py          # FaceEmbedding, MatchResult, config dataclasses
     │   └── interfaces.py        # ABCs (EmbeddingProvider, EmbeddingRepository, FileService)
     ├── application/             # Use-case orchestration
-    │   └── services.py          # IndexerService, MatcherService (centroid matching)
+    │   └── services.py          # IndexerService, MatcherService (centroid matching + zip)
     ├── infrastructure/          # Concrete implementations
     │   ├── embedding.py         # InsightFace detection + ArcFace ONNX embedding
     │   ├── qdrant_storage.py    # Qdrant vector DB repository (cosine distance)
     │   ├── storage.py           # JSON file fallback repository
     │   └── file_io.py           # Local file read/copy/save
     └── presentation/            # API layer
-        ├── api.py               # FastAPI app (match, match-by-path, Swagger)
+        ├── api.py               # FastAPI app (match, match-by-path, download, Swagger)
         └── scan.html            # Webcam capture UI (front/left/right)
 ```
 
@@ -34,81 +35,127 @@ Swapping out storage or the embedding backend only requires implementing the cor
 ## Requirements
 
 - Python 3.11
-- ~16 MB disk for the ONNX model (downloaded on first use from HuggingFace)
-- [Docker](https://docs.docker.com/engine/install/) for the Qdrant vector database
+- [Docker](https://docs.docker.com/engine/install/) and Docker Compose
+- ~16 MB disk for the ONNX model (downloaded automatically from HuggingFace)
 
-## Setup
+## Quick Start (Docker)
 
-```bash
-# From the immich-lite directory
-python -m venv .venv
-.venv\Scripts\activate.bat
-.venv\Scripts\pip install -r lite_ml_service\requirements.txt
-```
-
-(Dependencies are already installed in the shipped `.venv`.)
-
-### Qdrant vector database
-
-Start Qdrant via Docker Compose:
+One command to run everything:
 
 ```bash
 docker compose up -d
 ```
 
-This runs Qdrant on port 6333 (REST) and 6334 (gRPC) with a persistent named volume.
+This starts:
+- **Qdrant** vector database on port 6333 (REST) and 6334 (gRPC)
+- **Immich Lite** API server on port 8000
 
-### Configuration
+Then follow the [Indexing](#step-1-index-faces) and [Matching](#step-2-match-faces) sections below.
 
-Create a `.env` file at the project root:
+## Local Development Setup
+
+### 1. Install dependencies
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r lite_ml_service\requirements.txt
+```
+
+(Dependencies are already installed in the shipped `.venv`.)
+
+### 2. Start Qdrant
+
+```bash
+docker compose up -d qdrant
+```
+
+### 3. Configure environment
+
+**`.env`** — deployment secrets (Qdrant connection):
 
 ```env
 QDRANT_URL=http://localhost:6333
-QDRANT_COLLECTION_NAME=face_embeddings
-MODEL_NAME=buffalo_l
 ```
 
-| Variable                  | Default                | Description                             |
-| ------------------------- | ---------------------- | --------------------------------------- |
-| `QDRANT_URL`              | `http://localhost:6333`| Qdrant server REST endpoint             |
-| `QDRANT_API_KEY`          | _(none)_               | Optional API key for authenticated Qdrant|
-| `QDRANT_COLLECTION_NAME`  | `face_embeddings`      | Qdrant collection name                  |
-| `MODEL_NAME`              | `buffalo_l`            | InsightFace model (`buffalo_s` or `buffalo_l`) |
+**`config.yml`** — app configuration (paths, model, collection):
 
-On startup the service checks for `QDRANT_URL`. If set and reachable, it uses Qdrant; otherwise it falls back to JSON file storage (`embeddings.json`). The collection with COSINE distance and 512-dim vectors is created automatically.
+```yaml
+model_name: buffalo_l
+output_root: output
+qdrant_collection_name: face_embeddings
 
-## Usage
+image_paths:
+  - "C:\\Users\\SHO\\Pictures\\D-days\\50-days"
+  - "C:\\Users\\SHO\\Pictures\\D-days\\adama"
+  - "C:\\Users\\SHO\\Pictures\\D-days\\culture day"
+  - "C:\\Users\\SHO\\Pictures\\D-days\\grad"
+  - "C:\\Users\\SHO\\Pictures\\D-days\\jema"
+  - "C:\\Users\\SHO\\Pictures\\D-days\\kuriftu"
+  - "C:\\Users\\SHO\\Pictures\\D-days\\mechanical+yub"
+  - "C:\\Users\\SHO\\Pictures\\D-days\\oldies"
+  - "C:\\Users\\SHO\\Pictures\\D-days\\photo shoot"
+```
 
-### 1. Index faces from a directory
+| File | Purpose |
+|---|---|
+| `.env` | Secrets and deployment-specific overrides (`QDRANT_URL`, `QDRANT_API_KEY`) |
+| `config.yml` | App config (image paths, model name, output root, collection name) |
+
+Environment variables in `.env` always override values in `config.yml`.
+
+## How to Use
+
+### Step 1: Index faces
+
+#### Option A: Use image_paths from config.yml
+
+If `image_paths` is set in `config.yml`, just run:
 
 ```bash
-python run_indexer.py C:\Users\SHO\Pictures\immich
+python run_indexer.py
 ```
 
-This scans `path\to\photos` recursively for images, detects faces, extracts 512-dim ArcFace embeddings, and stores them in Qdrant (or `embeddings.json` as fallback).
+It will index all directories listed in `config.yml`.
 
-| Flag                  | Default           | Description                         |
-| --------------------- | ----------------- | ----------------------------------- |
+#### Option B: Pass directories as arguments
+
+```bash
+python run_indexer.py C:\Users\SHO\Pictures\D-days\50-days C:\Users\SHO\Pictures\D-days\adama
+```
+
+#### Option C: Mix both
+
+```bash
+python run_indexer.py C:\Users\SHO\Pictures\extra
+```
+
+This indexes the paths from `config.yml` **plus** any directories passed as arguments.
+
+| Flag | Default | Description |
+|---|---|---|
 | `--embeddings <path>` | `embeddings.json` | Fallback path when Qdrant is unused |
-| `--threshold <float>` | `0.5`             | Face detection confidence threshold |
+| `--threshold <float>` | `0.5` | Face detection confidence threshold |
 
-### 2. Start the matching API
+Re-run this command whenever you add new photos to your library.
+
+### Step 2: Start the API server
 
 ```bash
 python run_api.py
 ```
 
-| Flag                  | Default           | Description                             |
-| --------------------- | ----------------- | --------------------------------------- |
-| `--embeddings <path>` | `embeddings.json` | Fallback path when Qdrant is unused     |
-| `--output <dir>`      | `output`          | Root directory for match results        |
-| `--threshold <float>` | `0.5`             | Cosine similarity threshold for matches |
-| `--host <host>`       | `0.0.0.0`         | Bind address                            |
-| `--port <port>`       | `8000`            | Port                                    |
+| Flag | Default | Description |
+|---|---|---|
+| `--embeddings <path>` | `embeddings.json` | Fallback path when Qdrant is unused |
+| `--output <dir>` | `output` | Root directory for match results |
+| `--threshold <float>` | `0.5` | Cosine similarity threshold for matches |
+| `--host <host>` | `0.0.0.0` | Bind address |
+| `--port <port>` | `8000` | Port |
 
-### 3. Match a face via API
+### Step 3: Match faces
 
-#### Upload images (up to 3 files)
+#### Option A: Upload images (up to 3 files)
 
 ```bash
 curl -X POST http://localhost:8000/api/match \
@@ -118,7 +165,7 @@ curl -X POST http://localhost:8000/api/match \
   -F "name=person_name"
 ```
 
-#### Pass file paths directly
+#### Option B: Pass file paths on the server
 
 ```bash
 curl -X POST http://localhost:8000/api/match-by-path \
@@ -126,9 +173,21 @@ curl -X POST http://localhost:8000/api/match-by-path \
   -d '{"paths": ["C:/photos/front.jpg", "C:/photos/left.jpg"], "name": "person_name"}'
 ```
 
-Accepts a directory path — will scan all images inside it.
+#### Option C: Use the webcam UI
 
-#### How centroid matching works
+Open [http://localhost:8000/scan](http://localhost:8000/scan) in your browser. It guides you through capturing front, left, and right photos, which are automatically matched.
+
+### Step 4: Download results
+
+After matching, download all matched images (plus source) as a zip file:
+
+```bash
+curl -O http://localhost:8000/api/download/person_name
+```
+
+The zip is also saved at `output/<name>/matches/<name>.zip`.
+
+### How centroid matching works
 
 When uploading multiple images of the same person, the service:
 
@@ -137,21 +196,13 @@ When uploading multiple images of the same person, the service:
 3. Matches the centroid against all indexed embeddings (cosine similarity)
 4. This smooths out lighting, pose, and expression variations
 
-#### Webcam capture UI
-
-Open `http://localhost:8000/scan` in your browser to use the webcam-based capture interface. Guides you through:
-- **Front** — face the camera
-- **Left** — turn head slightly left  
-- **Right** — turn head slightly right
-
-Captures are automatically sent to the `/api/match` endpoint for centroid matching.
-
-#### Example response
+## Example Response
 
 ```json
 {
   "name": "person_name",
   "source_image": "output/person_name/source/source.jpg",
+  "zip_file": "output/person_name/matches/person_name.zip",
   "matches": [
     {
       "image_path": "C:/photos/group.jpg",
@@ -166,19 +217,20 @@ Captures are automatically sent to the `/api/match` endpoint for centroid matchi
 
 ## API Endpoints
 
-| Method | Path                | Description                                              |
-| ------ | ------------------- | -------------------------------------------------------- |
-| GET    | `/`                 | Service info                                             |
-| GET    | `/ping`             | Health check (returns `{"message": "pong"}`)             |
-| GET    | `/scan`             | Webcam capture UI for face enrollment                    |
-| POST   | `/api/match`        | Match face(s) via uploaded images (up to 3, centroid)    |
-| POST   | `/api/match-by-path`| Match face(s) via server-side file/directory paths       |
+| Method | Path | Description |
+|---|---|---|
+| GET | `/` | Service info |
+| GET | `/ping` | Health check |
+| GET | `/scan` | Webcam capture UI |
+| POST | `/api/match` | Match face(s) via uploaded images (up to 3, centroid) |
+| POST | `/api/match-by-path` | Match face(s) via server-side file/directory paths |
+| GET | `/api/download/{name}` | Download matched images as zip |
 
 ## Model
 
 Uses **insightface** model zoo with ONNX Runtime. The default model is `buffalo_l` (configurable via `MODEL_NAME` env var):
 
-- **RetinaFace** for face detection (localized ONNX model)
+- **RetinaFace** for face detection (ONNX)
 - **ArcFace** (W600K-R50) for 512-dimensional face embeddings
 
 Models are downloaded automatically on first use from HuggingFace (`immich-app/buffalo_l`) to `~/.cache/immich_ml/buffalo_l/`. You can also place a pre-downloaded `{model_name}.zip` at `C:\Users\SHO\Downloads\Setups/{model_name}.zip` to skip the download.

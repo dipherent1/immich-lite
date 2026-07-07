@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from lite_ml_service.application.services import MatcherService
 
@@ -65,7 +65,10 @@ def create_app(matcher_service: MatcherService) -> FastAPI:
             if path.is_dir():
                 image_files = sorted(
                     f for f in path.iterdir()
-                    if f.is_file() and f.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+                    if f.is_file() and f.suffix.lower() in {
+                        ".jpg", ".jpeg", ".png", ".webp", ".bmp",
+                        ".heic", ".heif", ".tiff", ".tif", ".gif", ".avif",
+                    }
                 )
                 if not image_files:
                     raise HTTPException(status_code=400, detail=f"No image files found in directory: {p}")
@@ -77,7 +80,8 @@ def create_app(matcher_service: MatcherService) -> FastAPI:
                 continue
 
             ext = path.suffix.lower()
-            if ext not in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}:
+            if ext not in {".jpg", ".jpeg", ".png", ".webp", ".bmp",
+                           ".heic", ".heif", ".tiff", ".tif", ".gif", ".avif"}:
                 raise HTTPException(status_code=400, detail=f"Unsupported file format: {p} (got '{ext}')")
 
             try:
@@ -91,5 +95,18 @@ def create_app(matcher_service: MatcherService) -> FastAPI:
         except Exception:
             logger.exception("Matching failed for '%s'", name)
             raise HTTPException(status_code=500, detail="Internal processing error")
+
+    @app.get("/api/download/{name}")
+    async def download_zip(name: str):
+        import os
+        output_root = os.environ.get("OUTPUT_ROOT", "output")
+        zip_path = Path(output_root) / name / "matches" / f"{name}.zip"
+        if not zip_path.exists():
+            raise HTTPException(status_code=404, detail=f"No results found for '{name}'")
+        return FileResponse(
+            path=str(zip_path),
+            media_type="application/zip",
+            filename=f"{name}.zip",
+        )
 
     return app

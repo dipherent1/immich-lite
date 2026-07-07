@@ -30,7 +30,10 @@ class IndexerConfig:
     source_dir: Path
     embeddings_path: Path
     detection_threshold: float = 0.5
-    image_extensions: set[str] = field(default_factory=lambda: {".jpg", ".jpeg", ".png", ".webp", ".bmp"})
+    image_extensions: set[str] = field(default_factory=lambda: {
+        ".jpg", ".jpeg", ".png", ".webp", ".bmp",
+        ".heic", ".heif", ".tiff", ".tif", ".gif", ".avif",
+    })
 
 
 @dataclass

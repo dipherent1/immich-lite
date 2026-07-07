@@ -8,7 +8,10 @@ from lite_ml_service.domain.interfaces import FileService
 
 logger = logging.getLogger(__name__)
 
-_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+_IMAGE_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".webp", ".bmp",
+    ".heic", ".heif", ".tiff", ".tif", ".gif", ".avif",
+}
 
 
 class LocalFileService(FileService):

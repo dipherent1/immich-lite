@@ -12,6 +12,27 @@ from lite_ml_service.domain.interfaces import EmbeddingProvider
 
 logger = logging.getLogger(__name__)
 
+HEIC_EXTENSIONS = {".heic", ".heif"}
+
+
+def _decode_image(image_bytes: bytes) -> np.ndarray:
+    header = image_bytes[:12]
+    is_heic = b"ftyp" in header or b"mif1" in header or b"heic" in header
+    if is_heic:
+        try:
+            from pillow_heif import register_heif_opener
+            register_heif_opener()
+            from PIL import Image
+            import io
+            img = Image.open(io.BytesIO(image_bytes))
+            img = img.convert("RGB")
+            return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+        except ImportError:
+            logger.warning("pillow-heif not installed, cannot decode HEIC image")
+            raise RuntimeError("HEIC support requires 'pillow-heif' package")
+    arr = np.frombuffer(image_bytes, dtype=np.uint8)
+    return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+
 MODEL_CACHE = Path.home() / ".cache" / "immich_ml"
 HF_BASE = "https://huggingface.co/immich-app"
 
@@ -127,8 +148,7 @@ class InsightFaceEmbeddingProvider(EmbeddingProvider):
     def detect_and_embed(self, image_bytes: bytes) -> list[FaceEmbedding]:
         self._ensure_model()
 
-        arr = np.frombuffer(image_bytes, dtype=np.uint8)
-        img_array = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        img_array = _decode_image(image_bytes)
 
         bboxes, landmarks = self._detector.detect(img_array)
         if len(bboxes) == 0:

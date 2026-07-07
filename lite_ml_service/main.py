@@ -5,6 +5,7 @@ import os
 import sys
 from pathlib import Path
 
+import yaml
 from dotenv import load_dotenv
 
 from lite_ml_service.application.services import IndexerService, MatcherService
@@ -25,16 +26,26 @@ logger = logging.getLogger("lite_ml_service")
 
 load_dotenv()
 
+CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.yml"
+
+
+def load_config() -> dict:
+    if CONFIG_FILE.exists():
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
+config = load_config()
+
 
 def create_repository(embeddings_path: str) -> EmbeddingRepository:
     qdrant_url = os.environ.get("QDRANT_URL")
     if qdrant_url:
         try:
+            collection = os.environ.get("QDRANT_COLLECTION_NAME", config.get("qdrant_collection_name", "face_embeddings"))
             logger.info("Using Qdrant storage: %s", qdrant_url)
-            return QdrantEmbeddingRepository(
-                url=qdrant_url,
-                collection_name=os.environ.get("QDRANT_COLLECTION_NAME", "face_embeddings"),
-            )
+            return QdrantEmbeddingRepository(url=qdrant_url, collection_name=collection)
         except Exception:
             logger.exception("Failed to connect to Qdrant at %s", qdrant_url, exc_info=True)
             logger.warning("Falling back to JSON file storage")
@@ -44,7 +55,7 @@ def create_repository(embeddings_path: str) -> EmbeddingRepository:
 
 
 def build_indexer(source_dir: str, embeddings_path: str, threshold: float = 0.5) -> IndexerService:
-    model_name = os.environ.get("MODEL_NAME", "buffalo_l")
+    model_name = os.environ.get("MODEL_NAME", config.get("model_name", "buffalo_l"))
     return IndexerService(
         embedding_provider=InsightFaceEmbeddingProvider(model_name=model_name, detection_threshold=threshold),
         repository=create_repository(embeddings_path),
@@ -63,12 +74,12 @@ def build_matcher(
     similarity_threshold: float = 0.5,
     detection_threshold: float = 0.5,
 ) -> tuple[MatcherService, object]:
-    model_name = os.environ.get("MODEL_NAME", "buffalo_l")
+    model_name = os.environ.get("MODEL_NAME", config.get("model_name", "buffalo_l"))
     embedder = InsightFaceEmbeddingProvider(model_name=model_name, detection_threshold=detection_threshold)
     repo = create_repository(embeddings_path)
     file_svc = LocalFileService()
 
-    config = MatcherConfig(
+    matcher_config = MatcherConfig(
         indexed_embeddings_path=Path(embeddings_path),
         output_root=Path(output_root),
         similarity_threshold=similarity_threshold,
@@ -79,21 +90,17 @@ def build_matcher(
         embedding_provider=embedder,
         repository=repo,
         file_service=file_svc,
-        config=config,
+        config=matcher_config,
     )
     return svc, embedder
 
 
 def run_indexer(args: list[str]) -> None:
-    if len(args) < 1:
-        print("Usage: python -m lite_ml_service index <source_dir> [--embeddings <path>] [--threshold <float>]")
-        sys.exit(1)
-
-    source_dir = args[0]
     embeddings_path = "embeddings.json"
     threshold = 0.5
+    source_dirs: list[str] = []
 
-    i = 1
+    i = 0
     while i < len(args):
         if args[i] == "--embeddings" and i + 1 < len(args):
             embeddings_path = args[i + 1]
@@ -102,11 +109,28 @@ def run_indexer(args: list[str]) -> None:
             threshold = float(args[i + 1])
             i += 2
         else:
+            source_dirs.append(args[i])
             i += 1
 
-    indexer = build_indexer(source_dir, embeddings_path, threshold)
-    total = indexer.run()
-    print(f"Indexed {total} faces from {source_dir}")
+    if not source_dirs:
+        image_paths = config.get("image_paths", [])
+        if image_paths:
+            source_dirs = [str(p) for p in image_paths]
+
+    if not source_dirs:
+        print("Usage: python -m lite_ml_service index <source_dir> [<source_dir2> ...] [--embeddings <path>] [--threshold <float>]")
+        print("  Or set image_paths in config.yml")
+        sys.exit(1)
+
+    total = 0
+    for source_dir in source_dirs:
+        logger.info("Indexing: %s", source_dir)
+        indexer = build_indexer(source_dir, embeddings_path, threshold)
+        count = indexer.run()
+        print(f"Indexed {count} faces from {source_dir}")
+        total += count
+
+    print(f"Total: {total} faces indexed from {len(source_dirs)} directory(ies)")
 
 
 def run_api(args: list[str]) -> None:
@@ -147,8 +171,8 @@ def run_api(args: list[str]) -> None:
 def main() -> None:
     if len(sys.argv) < 2:
         print("Usage: python -m lite_ml_service [index|api] <args>")
-        print("  index <source_dir>  -- Index faces from a directory")
-        print("  api                 -- Start the matching API server")
+        print("  index <source_dir> [<source_dir2> ...]  -- Index faces from directory(ies)")
+        print("  api                                      -- Start the matching API server")
         sys.exit(1)
 
     command = sys.argv[1]
