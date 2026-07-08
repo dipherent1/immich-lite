@@ -80,8 +80,8 @@ def build_matcher(
     file_svc = LocalFileService()
 
     matcher_config = MatcherConfig(
-        indexed_embeddings_path=Path(embeddings_path),
-        output_root=Path(output_root),
+        indexed_embeddings_path=Path(embeddings_path).resolve(),
+        output_root=Path(output_root).resolve(),
         similarity_threshold=similarity_threshold,
         detection_threshold=detection_threshold,
     )
@@ -98,11 +98,15 @@ def build_matcher(
 def run_indexer(args: list[str]) -> None:
     embeddings_path = "embeddings.json"
     threshold = 0.5
+    overwrite = True
     source_dirs: list[str] = []
 
     i = 0
     while i < len(args):
-        if args[i] == "--embeddings" and i + 1 < len(args):
+        if args[i] == "--add":
+            overwrite = False
+            i += 1
+        elif args[i] == "--embeddings" and i + 1 < len(args):
             embeddings_path = args[i + 1]
             i += 2
         elif args[i] == "--threshold" and i + 1 < len(args):
@@ -118,15 +122,16 @@ def run_indexer(args: list[str]) -> None:
             source_dirs = [str(p) for p in image_paths]
 
     if not source_dirs:
-        print("Usage: python -m lite_ml_service index <source_dir> [<source_dir2> ...] [--embeddings <path>] [--threshold <float>]")
+        print("Usage: python -m lite_ml_service index [<source_dir> ...] [--add] [--embeddings <path>] [--threshold <float>]")
+        print("  --add    Additive mode: don't clear existing embeddings for each directory")
         print("  Or set image_paths in config.yml")
         sys.exit(1)
 
     total = 0
     for source_dir in source_dirs:
-        logger.info("Indexing: %s", source_dir)
+        logger.info("Indexing: %s (overwrite=%s)", source_dir, overwrite)
         indexer = build_indexer(source_dir, embeddings_path, threshold)
-        count = indexer.run()
+        count = indexer.run(overwrite=overwrite)
         print(f"Indexed {count} faces from {source_dir}")
         total += count
 
@@ -171,8 +176,8 @@ def run_api(args: list[str]) -> None:
 def main() -> None:
     if len(sys.argv) < 2:
         print("Usage: python -m lite_ml_service [index|api] <args>")
-        print("  index <source_dir> [<source_dir2> ...]  -- Index faces from directory(ies)")
-        print("  api                                      -- Start the matching API server")
+        print("  index [<source_dir> ...] [--add]  -- Index faces from directory(ies)")
+        print("  api                                -- Start the matching API server")
         sys.exit(1)
 
     command = sys.argv[1]

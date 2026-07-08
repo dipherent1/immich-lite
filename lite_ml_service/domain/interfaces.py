@@ -15,6 +15,18 @@ class EmbeddingRepository(ABC):
         ...
 
     @abstractmethod
+    def upsert_batch(self, embeddings: list[FaceEmbedding]) -> None:
+        ...
+
+    @abstractmethod
+    def delete_by_dir(self, dir_path: str) -> int:
+        ...
+
+    @abstractmethod
+    def get_indexed_paths(self, dir_path: str) -> set[str]:
+        ...
+
+    @abstractmethod
     def load_all(self) -> list[FaceEmbedding]:
         ...
 

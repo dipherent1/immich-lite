@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
-CLI indexer: scans a directory of images, detects faces, and extracts embeddings.
+CLI indexer: scans directories of images, detects faces, and extracts embeddings.
 
 Usage:
-    python run_indexer.py [<source_dir> ...] [--embeddings <path>] [--threshold <float>]
+    python run_indexer.py [<source_dir> ...] [--add] [--embeddings <path>] [--threshold <float>]
 
-    If no source_dir is provided, uses IMAGE_PATHS from .env (semicolon-separated).
+    If no source_dir is provided, uses image_paths from config.yml.
+
+    --add    Additive mode: don't clear existing embeddings for each directory.
 
 Examples:
-    python run_indexer.py ./my_photos
-    python run_indexer.py ./photos1 ./photos2 --threshold 0.5
     python run_indexer.py
+    python run_indexer.py ./my_photos
+    python run_indexer.py --add ./new_photos
 """
 
 import sys

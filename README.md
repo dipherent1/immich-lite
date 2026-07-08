@@ -8,7 +8,8 @@ Clean Architecture with four layers:
 
 ```
 immich-lite/
-├── .env                        # Qdrant connection config + model selection
+├── .env                        # Qdrant connection (secrets only)
+├── config.yml                  # App config (paths, model, collection)
 ├── docker-compose.yml          # Qdrant + app services
 ├── Dockerfile                  # Python app container
 ├── run_indexer.py               # CLI entry point for indexing
@@ -19,15 +20,15 @@ immich-lite/
     │   ├── entities.py          # FaceEmbedding, MatchResult, config dataclasses
     │   └── interfaces.py        # ABCs (EmbeddingProvider, EmbeddingRepository, FileService)
     ├── application/             # Use-case orchestration
-    │   └── services.py          # IndexerService, MatcherService (centroid matching + zip)
+    │   └── services.py          # IndexerService (batch + progress bar), MatcherService
     ├── infrastructure/          # Concrete implementations
-    │   ├── embedding.py         # InsightFace detection + ArcFace ONNX embedding
-    │   ├── qdrant_storage.py    # Qdrant vector DB repository (cosine distance)
-    │   ├── storage.py           # JSON file fallback repository
+    │   ├── embedding.py         # InsightFace + ArcFace ONNX (HEIC support)
+    │   ├── qdrant_storage.py    # Qdrant vector DB (md5 IDs, batch upsert)
+    │   ├── storage.py           # JSON file fallback
     │   └── file_io.py           # Local file read/copy/save
     └── presentation/            # API layer
-        ├── api.py               # FastAPI app (match, match-by-path, download, Swagger)
-        └── scan.html            # Webcam capture UI (front/left/right)
+        ├── api.py               # FastAPI (match, download, Swagger)
+        └── scan.html            # Webcam capture UI
 ```
 
 Swapping out storage or the embedding backend only requires implementing the corresponding ABC.
@@ -116,7 +117,7 @@ If `image_paths` is set in `config.yml`, just run:
 python run_indexer.py
 ```
 
-It will index all directories listed in `config.yml`.
+It will index all directories listed in `config.yml` with a progress bar.
 
 #### Option B: Pass directories as arguments
 
@@ -124,20 +125,29 @@ It will index all directories listed in `config.yml`.
 python run_indexer.py C:\Users\SHO\Pictures\D-days\50-days C:\Users\SHO\Pictures\D-days\adama
 ```
 
-#### Option C: Mix both
+#### Option C: Additive mode (don't overwrite existing)
 
 ```bash
-python run_indexer.py C:\Users\SHO\Pictures\extra
+python run_indexer.py --add C:\Users\SHO\Pictures\new_folder
 ```
 
-This indexes the paths from `config.yml` **plus** any directories passed as arguments.
+This adds new faces without clearing existing embeddings. Safe to run multiple times.
 
 | Flag | Default | Description |
 |---|---|---|
+| `--add` | _(off)_ | Additive mode: keep existing embeddings, only add/update |
 | `--embeddings <path>` | `embeddings.json` | Fallback path when Qdrant is unused |
 | `--threshold <float>` | `0.5` | Face detection confidence threshold |
 
-Re-run this command whenever you add new photos to your library.
+**Indexing modes:**
+
+| Command | Behavior |
+|---|---|
+| `python run_indexer.py` | Re-index all dirs from config.yml (clears each dir's old embeddings first) |
+| `python run_indexer.py --add <dir>` | Add only — don't touch existing data |
+| `python run_indexer.py <dir>` | Re-index just that dir (clears its old embeddings) |
+
+Progress bar shows images processed, faces found, and skipped count. Embeddings are processed in batches of 32 and upserted in batches of 100 to avoid timeouts.
 
 ### Step 2: Start the API server
 
@@ -228,16 +238,18 @@ When uploading multiple images of the same person, the service:
 
 ## Model
 
-Uses **insightface** model zoo with ONNX Runtime. The default model is `buffalo_l` (configurable via `MODEL_NAME` env var):
+Uses **insightface** model zoo with ONNX Runtime. The default model is `buffalo_l` (configurable via `MODEL_NAME` in `config.yml`):
 
 - **RetinaFace** for face detection (ONNX)
 - **ArcFace** (W600K-R50) for 512-dimensional face embeddings
 
-Models are downloaded automatically on first use from HuggingFace (`immich-app/buffalo_l`) to `~/.cache/immich_ml/buffalo_l/`. You can also place a pre-downloaded `{model_name}.zip` at `C:\Users\SHO\Downloads\Setups/{model_name}.zip` to skip the download.
+**Supported image formats:** JPG, PNG, WebP, BMP, HEIC, HEIF, TIFF, GIF, AVIF
+
+Models are downloaded automatically on first use from HuggingFace (`immich-app/buffalo_l`) to `~/.cache/immich_ml/buffalo_l/`.
 
 ## Extending
 
-- **Storage**: Implement `EmbeddingRepository` to use a different vector DB
+- **Storage**: Implement `EmbeddingRepository` (`save_all`, `upsert_batch`, `delete_by_dir`, `find_similar`)
 - **Multi-face centroid**: Upload multiple images — embeddings are averaged into a centroid for more robust matching
-- **Model**: Set `MODEL_NAME=buffalo_s` in `.env` for faster but less accurate inference
+- **Model**: Set `model_name: buffalo_s` in `config.yml` for faster but less accurate inference
 - **Embedding backend**: Implement `EmbeddingProvider` to swap in a different model

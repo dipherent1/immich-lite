@@ -98,15 +98,14 @@ def create_app(matcher_service: MatcherService) -> FastAPI:
 
     @app.get("/api/download/{name}")
     async def download_zip(name: str):
-        import os
-        output_root = os.environ.get("OUTPUT_ROOT", "output")
-        zip_path = Path(output_root) / name / "matches" / f"{name}.zip"
+        zip_path = matcher_service._config.output_root / name / f"{name}.zip"
         if not zip_path.exists():
             raise HTTPException(status_code=404, detail=f"No results found for '{name}'")
         return FileResponse(
             path=str(zip_path),
             media_type="application/zip",
             filename=f"{name}.zip",
+            headers={"Content-Disposition": f'attachment; filename="{name}.zip"'},
         )
 
     return app

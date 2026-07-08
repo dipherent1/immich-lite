@@ -37,13 +37,21 @@
   .name-input input { padding: 10px 14px; border-radius: 10px; border: 1px solid #333; background: #1a1a1a; color: #fff; font-size: 0.95rem; width: 200px; outline: none; }
   .name-input input:focus { border-color: #3b82f6; }
   .results { margin-top: 20px; width: 640px; max-width: 100%; }
-  .results h2 { font-size: 1rem; color: #888; margin-bottom: 8px; }
+  .results-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .results-header h2 { font-size: 1rem; color: #888; }
   .match-item { background: #1a1a1a; border-radius: 10px; padding: 12px 16px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
-  .match-item .sim { color: #22c55e; font-weight: 600; }
-  .match-item .path { color: #aaa; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%; }
+  .match-item .sim { color: #22c55e; font-weight: 600; font-size: 0.95rem; }
+  .match-item .info { display: flex; flex-direction: column; gap: 2px; overflow: hidden; flex: 1; margin-right: 12px; }
+  .match-item .filename { font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .match-item .abspath { color: #666; font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .status { margin-top: 12px; font-size: 0.85rem; color: #888; }
   .error { color: #ef4444; }
   .hidden { display: none; }
+  .download-bar { display: flex; gap: 10px; align-items: center; margin-top: 12px; padding: 12px 16px; background: #1a1a1a; border-radius: 10px; }
+  .download-bar button { padding: 10px 20px; background: #3b82f6; color: #fff; border: none; border-radius: 8px; font-weight: 500; font-size: 0.9rem; cursor: pointer; transition: background .15s; }
+  .download-bar button:hover { background: #2563eb; }
+  .download-bar button:disabled { opacity: 0.35; cursor: not-allowed; }
+  .download-bar .meta { color: #888; font-size: 0.85rem; }
 </style>
 </head>
 <body>
@@ -78,7 +86,16 @@
   </div>
 
   <div class="results hidden" id="results">
-    <h2>Matches</h2>
+    <div id="download-section" class="hidden">
+      <div class="download-bar">
+        <button id="btn-download">Download Results (.zip)</button>
+        <span class="meta" id="download-meta"></span>
+      </div>
+    </div>
+    <div class="results-header">
+      <h2>Matches</h2>
+      <span class="meta" id="match-summary"></span>
+    </div>
     <div id="match-list"></div>
     <div class="status" id="status-text"></div>
   </div>
@@ -104,8 +121,12 @@ const btnSubmit = document.getElementById('btn-submit');
 const previews = document.getElementById('previews');
 const results = document.getElementById('results');
 const matchList = document.getElementById('match-list');
+const matchSummary = document.getElementById('match-summary');
 const statusText = document.getElementById('status-text');
 const nameInput = document.getElementById('name');
+const downloadSection = document.getElementById('download-section');
+const btnDownload = document.getElementById('btn-download');
+const downloadMeta = document.getElementById('download-meta');
 
 async function init() {
   try {
@@ -164,7 +185,9 @@ async function submitMatch() {
   btnSubmit.textContent = 'Matching...';
   results.classList.remove('hidden');
   matchList.innerHTML = '';
+  matchSummary.textContent = '';
   statusText.textContent = 'Processing...';
+  downloadSection.classList.add('hidden');
 
   const formData = new FormData();
   const entries = Object.entries(captures);
@@ -188,14 +211,52 @@ async function submitMatch() {
 
     matchList.innerHTML = '';
     data.matches.forEach(m => {
+      const filename = m.image_path.split('\\').pop();
+      const pct = (m.similarity * 100).toFixed(1);
       const div = document.createElement('div');
       div.className = 'match-item';
-      div.innerHTML = `<span class="path">${m.image_path.split('\\').pop()}</span><span class="sim">${(m.similarity * 100).toFixed(1)}%</span>`;
+      div.innerHTML = `
+        <div class="info">
+          <span class="filename">${filename}</span>
+          <span class="abspath">${m.image_path}</span>
+        </div>
+        <span class="sim">${pct}%</span>`;
       matchList.appendChild(div);
     });
 
-    statusText.textContent = `${data.matched_count} match(es) found`;
+    matchSummary.textContent = `${data.matched_count} match(es) found`;
+    statusText.textContent = '';
     statusText.classList.remove('error');
+
+    if (data.matched_count > 0) {
+      downloadSection.classList.remove('hidden');
+      downloadMeta.textContent = `${data.matched_count} matches found`;
+      btnDownload.onclick = async () => {
+        btnDownload.disabled = true;
+        btnDownload.textContent = 'Downloading...';
+        try {
+          const res = await fetch(`/api/download/${encodeURIComponent(name)}`);
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: res.statusText }));
+            throw new Error(err.detail || 'Download failed');
+          }
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${name}.zip`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        } catch (e) {
+          statusText.textContent = `Download failed: ${e.message}`;
+          statusText.classList.add('error');
+        }
+        btnDownload.disabled = false;
+        btnDownload.textContent = 'Download Results (.zip)';
+      };
+    }
   } catch (e) {
     statusText.textContent = `Error: ${e.message}`;
     statusText.classList.add('error');
@@ -218,7 +279,9 @@ function resetAll() {
   btnSubmit.disabled = true;
   results.classList.add('hidden');
   matchList.innerHTML = '';
+  matchSummary.textContent = '';
   statusText.textContent = '';
+  downloadSection.classList.add('hidden');
 }
 
 function dataURLtoBlob(dataUrl) {

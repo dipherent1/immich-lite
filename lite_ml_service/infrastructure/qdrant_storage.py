@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 
@@ -12,6 +13,11 @@ from lite_ml_service.domain.interfaces import EmbeddingRepository
 logger = logging.getLogger(__name__)
 
 VECTOR_DIM = 512
+UPSERT_BATCH_SIZE = 100
+
+
+def _point_id(image_path: str) -> str:
+    return hashlib.md5(image_path.encode()).hexdigest()
 
 
 class QdrantEmbeddingRepository(EmbeddingRepository):
@@ -39,33 +45,90 @@ class QdrantEmbeddingRepository(EmbeddingRepository):
         else:
             logger.info("Qdrant collection already exists: %s", self._collection_name)
 
+    def _to_point(self, emb: FaceEmbedding) -> PointStruct:
+        return PointStruct(
+            id=_point_id(emb.image_path),
+            vector=emb.embedding,
+            payload={
+                "image_path": emb.image_path,
+                "bbox_x1": emb.bbox.x1,
+                "bbox_y1": emb.bbox.y1,
+                "bbox_x2": emb.bbox.x2,
+                "bbox_y2": emb.bbox.y2,
+                "face_score": emb.face_score,
+            },
+        )
+
     def save_all(self, embeddings: list[FaceEmbedding]) -> None:
         self._client.recreate_collection(
             collection_name=self._collection_name,
             vectors_config=VectorParams(size=VECTOR_DIM, distance=Distance.COSINE),
         )
-        points = [
-            PointStruct(
-                id=i,
-                vector=emb.embedding,
-                payload={
-                    "image_path": emb.image_path,
-                    "bbox_x1": emb.bbox.x1,
-                    "bbox_y1": emb.bbox.y1,
-                    "bbox_x2": emb.bbox.x2,
-                    "bbox_y2": emb.bbox.y2,
-                    "face_score": emb.face_score,
-                },
-            )
-            for i, emb in enumerate(embeddings)
-        ]
-        if points:
+        self.upsert_batch(embeddings)
+        logger.info("Saved %d embeddings (full replace) to Qdrant", len(embeddings))
+
+    def upsert_batch(self, embeddings: list[FaceEmbedding]) -> None:
+        for i in range(0, len(embeddings), UPSERT_BATCH_SIZE):
+            batch = embeddings[i : i + UPSERT_BATCH_SIZE]
+            points = [self._to_point(emb) for emb in batch]
             self._client.upsert(collection_name=self._collection_name, points=points)
-        logger.info("Saved %d embeddings to Qdrant collection: %s", len(embeddings), self._collection_name)
+        logger.debug("Upserted %d embeddings to Qdrant", len(embeddings))
+
+    def delete_by_dir(self, dir_path: str) -> int:
+        from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+
+        dir_path_norm = dir_path.replace("\\", "/").rstrip("/")
+
+        all_ids = []
+        offset = None
+        while True:
+            page, offset = self._client.scroll(
+                collection_name=self._collection_name,
+                limit=1000,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in page:
+                p = point.payload or {}
+                img = p.get("image_path", "").replace("\\", "/").rstrip("/")
+                if img.startswith(dir_path_norm):
+                    all_ids.append(point.id)
+            if offset is None:
+                break
+
+        if all_ids:
+            self._client.delete(
+                collection_name=self._collection_name,
+                points_selector=all_ids,
+            )
+        logger.info("Deleted %d embeddings for directory: %s", len(all_ids), dir_path)
+        return len(all_ids)
+
+    def get_indexed_paths(self, dir_path: str) -> set[str]:
+        dir_path_norm = dir_path.replace("\\", "/").rstrip("/")
+        paths = set()
+        offset = None
+        while True:
+            page, offset = self._client.scroll(
+                collection_name=self._collection_name,
+                limit=1000,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in page:
+                p = point.payload or {}
+                img = p.get("image_path", "").replace("\\", "/").rstrip("/")
+                if img.startswith(dir_path_norm):
+                    paths.add(p.get("image_path", ""))
+            if offset is None:
+                break
+        return paths
 
     def load_all(self) -> list[FaceEmbedding]:
         results: list[FaceEmbedding] = []
-        offset: str | None = None
+        offset = None
         while True:
             page, offset = self._client.scroll(
                 collection_name=self._collection_name,

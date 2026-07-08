@@ -12,8 +12,6 @@ from lite_ml_service.domain.interfaces import EmbeddingProvider
 
 logger = logging.getLogger(__name__)
 
-HEIC_EXTENSIONS = {".heic", ".heif"}
-
 
 def _decode_image(image_bytes: bytes) -> np.ndarray:
     header = image_bytes[:12]
@@ -31,7 +29,10 @@ def _decode_image(image_bytes: bytes) -> np.ndarray:
             logger.warning("pillow-heif not installed, cannot decode HEIC image")
             raise RuntimeError("HEIC support requires 'pillow-heif' package")
     arr = np.frombuffer(image_bytes, dtype=np.uint8)
-    return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError("OpenCV could not decode image (corrupt or unsupported format)")
+    return img
 
 MODEL_CACHE = Path.home() / ".cache" / "immich_ml"
 HF_BASE = "https://huggingface.co/immich-app"

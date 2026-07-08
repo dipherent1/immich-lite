@@ -16,6 +16,15 @@ class JsonEmbeddingRepository(EmbeddingRepository):
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
 
+    def _load_raw(self) -> list[dict]:
+        if not self._path.exists():
+            return []
+        return json.loads(self._path.read_text(encoding="utf-8"))
+
+    def _write_raw(self, data: list[dict]) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
     def save_all(self, embeddings: list[FaceEmbedding]) -> None:
         data = [
             {
@@ -26,16 +35,48 @@ class JsonEmbeddingRepository(EmbeddingRepository):
             }
             for emb in embeddings
         ]
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        self._write_raw(data)
         logger.info("Saved %d embeddings to %s", len(embeddings), self._path)
 
+    def upsert_batch(self, embeddings: list[FaceEmbedding]) -> None:
+        existing = {item["image_path"]: item for item in self._load_raw()}
+        for emb in embeddings:
+            existing[emb.image_path] = {
+                "image_path": emb.image_path,
+                "embedding": emb.embedding,
+                "bbox": [emb.bbox.x1, emb.bbox.y1, emb.bbox.x2, emb.bbox.y2],
+                "face_score": emb.face_score,
+            }
+        self._write_raw(list(existing.values()))
+        logger.debug("Upserted %d embeddings to %s", len(embeddings), self._path)
+
+    def delete_by_dir(self, dir_path: str) -> int:
+        dir_norm = Path(dir_path).as_posix().rstrip("/")
+        data = self._load_raw()
+        before = len(data)
+        data = [
+            item for item in data
+            if not Path(item["image_path"]).as_posix().startswith(dir_norm)
+        ]
+        removed = before - len(data)
+        self._write_raw(data)
+        logger.info("Deleted %d embeddings for directory: %s", removed, dir_path)
+        return removed
+
+    def get_indexed_paths(self, dir_path: str) -> set[str]:
+        dir_norm = Path(dir_path).as_posix().rstrip("/")
+        data = self._load_raw()
+        return {
+            item["image_path"] for item in data
+            if Path(item["image_path"]).as_posix().startswith(dir_norm)
+        }
+
     def load_all(self) -> list[FaceEmbedding]:
-        if not self._path.exists():
+        data = self._load_raw()
+        if not data:
             logger.warning("Embeddings file not found: %s", self._path)
             return []
 
-        data = json.loads(self._path.read_text(encoding="utf-8"))
         results = [
             FaceEmbedding(
                 image_path=item["image_path"],
