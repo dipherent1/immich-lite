@@ -81,7 +81,7 @@ This starts:
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
-pip install -r lite_ml_service\requirements.txt
+pip install -r requirements.txt
 ```
 
 For the new `src/app` layer, also install the relational/migration stack (included in the requirements above):

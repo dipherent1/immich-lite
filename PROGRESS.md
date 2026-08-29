@@ -29,7 +29,7 @@ Tracks completed work against [PHASES.md](PHASES.md). See [TODO.md](TODO.md) for
 - **Kept the legacy package importable**
   - `lite_ml_service/` modules now re-export from the relocated `src/app` code (with a `sys.path` bootstrap in `lite_ml_service/__init__.py`), so `run_indexer.py` / `run_api.py` still work.
 - **Dockerfile** now builds/runs the new `src/app` app (`uvicorn app.main:app`).
-- **Added deps** to `lite_ml_service/requirements.txt`: `sqlalchemy`, `sqlmodel`, `alembic`, `pydantic-settings`, `psycopg2-binary`.
+- **Added deps** to `requirements.txt`: `sqlalchemy`, `sqlmodel`, `alembic`, `pydantic-settings`, `psycopg2-binary`.
 
 ### Stop-condition verification
 
