@@ -6,3 +6,6 @@ __pycache__/
 embeddings.json
 output/
 qdrant_storage/
+graphify-out/
+.opencode/
+.vscode/

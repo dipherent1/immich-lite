@@ -4,7 +4,6 @@ qdrant_collection_name: face_embeddings
 
 image_paths:
   - "C:\\Users\\SHO\\Pictures\\D-days\\50-days"
-  - "C:\\Users\\SHO\\Pictures\\D-days\\50-days"
   - "C:\\Users\\SHO\\Pictures\\D-days\\adama"
   - "C:\\Users\\SHO\\Pictures\\D-days\\culture day"
   - "C:\\Users\\SHO\\Pictures\\D-days\\grad"

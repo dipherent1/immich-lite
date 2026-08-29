@@ -11,3 +11,10 @@ python-dotenv>=1.0.0
 pyyaml>=6.0
 pillow-heif>=0.16.0
 tqdm>=4.66.0
+
+# Phase 0+ relational layer and migrations
+sqlalchemy>=2.0.0
+sqlmodel>=0.0.42
+alembic>=1.13.0
+pydantic-settings>=2.0.0
+psycopg2-binary>=2.9.0

@@ -3,25 +3,48 @@ services:
     image: qdrant/qdrant:latest
     container_name: immich-qdrant
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "8090:6333"
+      - "8100:6334"
     volumes:
       - qdrant_storage:/qdrant/storage
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: immich-lite-postgres
+    environment:
+      POSTGRES_USER: immich
+      POSTGRES_PASSWORD: immich
+      POSTGRES_DB: immich_lite
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_storage:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U immich -d immich_lite"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
 
   app:
     build: .
     container_name: immich-lite-app
     ports:
-      - "8000:8000"
+      - "8080:8000"
     volumes:
       - ./output:/app/output
       - ./config.yml:/app/config.yml
     environment:
       - QDRANT_URL=http://qdrant:6333
+      - DATABASE_URL=postgresql+psycopg2://immich:immich@postgres:5432/immich_lite
     depends_on:
-      - qdrant
+      qdrant:
+        condition: service_started
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   qdrant_storage:
+  postgres_storage:

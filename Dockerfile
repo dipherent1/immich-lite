@@ -14,10 +14,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN python -c "from lite_ml_service.infrastructure.embedding import _ensure_model_files; _ensure_model_files('buffalo_l')"
+ENV PYTHONPATH=/app/src
+RUN python -c "from app.services.embedding_service import _ensure_model_files; _ensure_model_files('buffalo_l')"
 
 ENV QDRANT_URL=http://qdrant:6333
 
 EXPOSE 8000
 
-CMD ["python", "run_api.py"]
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

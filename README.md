@@ -1,37 +1,55 @@
 # Immich Lite — Face Matching Microservice
 
-A lightweight, standalone Python microservice for face embedding extraction and similarity matching, extracted from the main [Immich](https://github.com/immich-app/immich) machine-learning service. Uses the same **insightface** backend (ArcFace + RetinaFace) to keep embeddings compatible with the full Immich pipeline.
+A lightweight, standalone Python microservice for face embedding extraction and similarity matching, extracted from the main [Immich](https://github.com/immich-app/immich) machine-learning service. It uses the same **insightface** backend (ArcFace + RetinaFace) to keep embeddings compatible with the full Immich pipeline.
 
-## Architecture
+The project is being rebuilt around a phased plan (see [PHASES.md](PHASES.md)). **Phase 0 (repo restructure) is complete.** The code has been relocated into the new `src/app/...` layout without changing behavior.
 
-Clean Architecture with four layers:
+## Status
+
+| Phase | Description | Status |
+|---|---|---|
+| 0 | Repo restructure, no behavior change | ✅ Done |
+| 1 | Accounts & Auth | ⬜ Todo |
+| 2 | Face Profile Enrollment | ⬜ Todo |
+| 3 | Events | ⬜ Todo |
+| 4 | Photo Ingestion Pipeline | ⬜ Todo |
+| 5 | Matching & Delivery | ⬜ Todo |
+| 6 | Notifications (optional) | ⬜ Todo |
+| 7 | Hardening & Ops | ⬜ Todo |
+
+See [PROGRESS.md](PROGRESS.md) for what's done and [TODO.md](TODO.md) for what's next.
+
+## Phase 0 — Architecture (current)
+
+The codebase now has two layers:
+
+- **`src/app/`** — the new canonical application:
+  - `main.py` — FastAPI app with `/ping` health check
+  - `api/v1/api.py` — the API router (empty so far; sub-routers like auth/users/events land here in later phases)
+  - `core/` — `config.py` (Pydantic settings), `database.py` (SQLModel/Postgres engine + session + `Base`), `vector_db.py` (Qdrant client)
+  - `services/` — `embedding_service.py` (InsightFace + ArcFace + RetinaFace)
+  - `domain/` — entities + interfaces (moved from the old package)
+  - `models/`, `schemas/`, `workers/` — empty placeholders for later phases
+- **`lite_ml_service/`** — the **legacy** package. It is superseded but still importable: its modules re-export from the relocated `src/app` code so the old CLI scripts (`run_indexer.py`, `run_api.py`) keep working. Do not add new code here.
 
 ```
 immich-lite/
-├── .env                        # Qdrant connection (secrets only)
-├── config.yml                  # App config (paths, model, collection)
-├── docker-compose.yml          # Qdrant + app services
-├── Dockerfile                  # Python app container
-├── run_indexer.py               # CLI entry point for indexing
-├── run_api.py                   # Entry point for the API server
-├── .venv/                       # Python 3.11 virtual environment
-└── lite_ml_service/
-    ├── domain/                  # Entities + interfaces
-    │   ├── entities.py          # FaceEmbedding, MatchResult, config dataclasses
-    │   └── interfaces.py        # ABCs (EmbeddingProvider, EmbeddingRepository, FileService)
-    ├── application/             # Use-case orchestration
-    │   └── services.py          # IndexerService (batch + progress bar), MatcherService
-    ├── infrastructure/          # Concrete implementations
-    │   ├── embedding.py         # InsightFace + ArcFace ONNX (HEIC support)
-    │   ├── qdrant_storage.py    # Qdrant vector DB (md5 IDs, batch upsert)
-    │   ├── storage.py           # JSON file fallback
-    │   └── file_io.py           # Local file read/copy/save
-    └── presentation/            # API layer
-        ├── api.py               # FastAPI (match, download, Swagger)
-        └── scan.html            # Webcam capture UI
+├── src/app/                     # canonical app
+│   ├── main.py                  # FastAPI + /ping
+│   ├── api/v1/api.py            # router (empty in Phase 0)
+│   ├── core/{config,database,vector_db}.py
+│   ├── services/embedding_service.py
+│   ├── domain/{entities,interfaces}.py
+│   └── models/, schemas/, workers/
+├── lite_ml_service/             # legacy (re-exports from src/app)
+├── migrations/                  # Alembic migrations (env.py wired to app Base)
+├── alembic.ini                  # Alembic config
+├── docker-compose.yml           # Qdrant + PostgreSQL + app
+├── Dockerfile
+├── run_indexer.py / run_api.py  # legacy CLI entry points
+├── config.yml                   # legacy config
+└── output/                      # legacy match output
 ```
-
-Swapping out storage or the embedding backend only requires implementing the corresponding ABC.
 
 ## Requirements
 
@@ -41,17 +59,20 @@ Swapping out storage or the embedding backend only requires implementing the cor
 
 ## Quick Start (Docker)
 
-One command to run everything:
-
 ```bash
 docker compose up -d
 ```
 
 This starts:
-- **Qdrant** vector database on port 6333 (REST) and 6334 (gRPC)
-- **Immich Lite** API server on port 8000
+- **Qdrant** vector database (host ports `8090` REST / `8100` gRPC)
+- **PostgreSQL** (host port `5433`)
+- **Immich Lite** API server on host port `8080` (maps to the container's 8000)
 
-Then follow the [Indexing](#step-1-index-faces) and [Matching](#step-2-match-faces) sections below.
+> Note on this machine: Windows reserves TCP port ranges (e.g. `6267–6366`,
+> `7906–8005`) that block binding to `6333`/`6334` and `8000`. The compose file maps
+> to host ports outside those ranges (`8090`/`8100`/`8080`). The container ports are
+> unchanged — only the host-facing bindings differ. Verify a port is free with
+> `python -c "import socket; socket.socket().bind(('0.0.0.0', PORT))"`.
 
 ## Local Development Setup
 
@@ -63,169 +84,102 @@ python -m venv .venv
 pip install -r lite_ml_service\requirements.txt
 ```
 
-(Dependencies are already installed in the shipped `.venv`.)
-
-### 2. Start Qdrant
+For the new `src/app` layer, also install the relational/migration stack (included in the requirements above):
 
 ```bash
-docker compose up -d qdrant
+pip install sqlalchemy sqlmodel alembic pydantic-settings psycopg2-binary
 ```
 
-### 3. Configure environment
+### 2. Start the backing services
 
-**`.env`** — deployment secrets (Qdrant connection):
+```bash
+docker compose up -d qdrant postgres
+```
+
+### 3. Configure environment (`.env`)
 
 ```env
-QDRANT_URL=http://localhost:6333
+QDRANT_URL=http://localhost:8090
+DATABASE_URL=postgresql+psycopg2://immich:immich@localhost:5433/immich_lite
 ```
 
-**`config.yml`** — app configuration (paths, model, collection):
+Settings are read from `.env` by `src/app/core/config.py` (Pydantic settings). Override any field with the matching env var.
 
-```yaml
-model_name: buffalo_l
-output_root: output
-qdrant_collection_name: face_embeddings
-
-image_paths:
-  - "C:\\Users\\SHO\\Pictures\\D-days\\50-days"
-  - "C:\\Users\\SHO\\Pictures\\D-days\\adama"
-  - "C:\\Users\\SHO\\Pictures\\D-days\\culture day"
-  - "C:\\Users\\SHO\\Pictures\\D-days\\grad"
-  - "C:\\Users\\SHO\\Pictures\\D-days\\jema"
-  - "C:\\Users\\SHO\\Pictures\\D-days\\kuriftu"
-  - "C:\\Users\\SHO\\Pictures\\D-days\\mechanical+yub"
-  - "C:\\Users\\SHO\\Pictures\\D-days\\oldies"
-  - "C:\\Users\\SHO\\Pictures\\D-days\\photo shoot"
-```
-
-| File | Purpose |
-|---|---|
-| `.env` | Secrets and deployment-specific overrides (`QDRANT_URL`, `QDRANT_API_KEY`) |
-| `config.yml` | App config (image paths, model name, output root, collection name) |
-
-Environment variables in `.env` always override values in `config.yml`.
-
-## How to Use
-
-### Step 1: Index faces
-
-#### Option A: Use image_paths from config.yml
-
-If `image_paths` is set in `config.yml`, just run:
+### 4. Run the new API server
 
 ```bash
-python run_indexer.py
+# from the project root
+PYTHONPATH=src uvicorn app.main:app --host 0.0.0.0 --port 8080
+uvicorn app.main:app --host 0.0.0.0 --port 8080   # (if running from src/)
 ```
 
-It will index all directories listed in `config.yml` with a progress bar.
-
-#### Option B: Pass directories as arguments
+Health check:
 
 ```bash
-python run_indexer.py C:\Users\SHO\Pictures\D-days\50-days C:\Users\SHO\Pictures\D-days\adama
+curl http://localhost:8080/ping
+# {"message":"pong"}
 ```
 
-#### Option C: Additive mode (don't overwrite existing)
+## Database Migrations (Alembic)
+
+Alembic owns every schema change — never rely on `Base.metadata.create_all()` for the app DB.
 
 ```bash
-python run_indexer.py --add C:\Users\SHO\Pictures\new_folder
+# Apply all migrations (Phase 0 ships no tables yet; proves wiring + creates alembic_version)
+alembic upgrade head
+
+# Preview the SQL Alembic would emit
+alembic upgrade head --sql
+
+# Roll back one step
+alembic downgrade -1
+
+# Generate a migration from model changes
+alembic revision --autogenerate -m "describe change"
 ```
 
-This adds new faces without clearing existing embeddings. Safe to run multiple times.
+`migrations/env.py` is wired to `app.core.database.Base` and reads the DB URL from the app settings.
 
-| Flag | Default | Description |
+## API Endpoints
+
+| Method | Path | Description |
 |---|---|---|
-| `--add` | _(off)_ | Additive mode: keep existing embeddings, only add/update |
-| `--embeddings <path>` | `embeddings.json` | Fallback path when Qdrant is unused |
-| `--threshold <float>` | `0.5` | Face detection confidence threshold |
+| GET | `/ping` | Health check |
 
-**Indexing modes:**
+(Routes for auth, users, events, photos, and matches are added in later phases under `/api/v1/...`.)
 
-| Command | Behavior |
-|---|---|
-| `python run_indexer.py` | Re-index all dirs from config.yml (clears each dir's old embeddings first) |
-| `python run_indexer.py --add <dir>` | Add only — don't touch existing data |
-| `python run_indexer.py <dir>` | Re-index just that dir (clears its old embeddings) |
+## Model
 
-Progress bar shows images processed, faces found, and skipped count. Embeddings are processed in batches of 32 and upserted in batches of 100 to avoid timeouts.
+Uses **insightface** model zoo with ONNX Runtime. The default model is `buffalo_l` (configurable via `MODEL_NAME` in `config.yml` / `model_name` setting):
 
-### Step 2: Start the API server
+- **RetinaFace** for face detection (ONNX)
+- **ArcFace** (W600K-R50) for 512-dimensional face embeddings
+
+**Supported image formats:** JPG, PNG, WebP, BMP, HEIC, HEIF, TIFF, GIF, AVIF
+
+Models are downloaded automatically on first use from HuggingFace (`immich-app/buffalo_l`) to `~/.cache/immich_ml/buffalo_l/`.
+
+---
+
+## Legacy CLI (superseded, still works)
+
+The original indexer/matcher workflow is being replaced. It is kept functional for reference and can be removed once the new phases cover it. It lives in `lite_ml_service/` and is still importable via `run_indexer.py` / `run_api.py`.
+
+### Index faces
+
+```bash
+python run_indexer.py                      # index all dirs from config.yml
+python run_indexer.py C:\some\photos       # index a specific directory
+python run_indexer.py --add C:\new_photos  # additive mode
+```
+
+### Run the legacy API
 
 ```bash
 python run_api.py
 ```
 
-| Flag | Default | Description |
-|---|---|---|
-| `--embeddings <path>` | `embeddings.json` | Fallback path when Qdrant is unused |
-| `--output <dir>` | `output` | Root directory for match results |
-| `--threshold <float>` | `0.5` | Cosine similarity threshold for matches |
-| `--host <host>` | `0.0.0.0` | Bind address |
-| `--port <port>` | `8000` | Port |
-
-### Step 3: Match faces
-
-#### Option A: Upload images (up to 3 files)
-
-```bash
-curl -X POST http://localhost:8000/api/match \
-  -F "file1=@front.jpg" \
-  -F "file2=@left.jpg" \
-  -F "file3=@right.jpg" \
-  -F "name=person_name"
-```
-
-#### Option B: Pass file paths on the server
-
-```bash
-curl -X POST http://localhost:8000/api/match-by-path \
-  -H "Content-Type: application/json" \
-  -d '{"paths": ["C:/photos/front.jpg", "C:/photos/left.jpg"], "name": "person_name"}'
-```
-
-#### Option C: Use the webcam UI
-
-Open [http://localhost:8000/scan](http://localhost:8000/scan) in your browser. It guides you through capturing front, left, and right photos, which are automatically matched.
-
-### Step 4: Download results
-
-After matching, download all matched images (plus source) as a zip file:
-
-```bash
-curl -O http://localhost:8000/api/download/person_name
-```
-
-The zip is also saved at `output/<name>/matches/<name>.zip`.
-
-### How centroid matching works
-
-When uploading multiple images of the same person, the service:
-
-1. Detects all faces in every uploaded image
-2. Averages all 512-dimension embeddings into a single **centroid vector**
-3. Matches the centroid against all indexed embeddings (cosine similarity)
-4. This smooths out lighting, pose, and expression variations
-
-## Example Response
-
-```json
-{
-  "name": "person_name",
-  "source_image": "output/person_name/source/source.jpg",
-  "zip_file": "output/person_name/matches/person_name.zip",
-  "matches": [
-    {
-      "image_path": "C:/photos/group.jpg",
-      "copied_to": "output/person_name/matches/group.jpg",
-      "similarity": 0.9214,
-      "bounding_box": { "x1": 120, "y1": 80, "x2": 200, "y2": 260 }
-    }
-  ],
-  "matched_count": 1
-}
-```
-
-## API Endpoints
+### Legacy endpoints
 
 | Method | Path | Description |
 |---|---|---|
@@ -236,20 +190,21 @@ When uploading multiple images of the same person, the service:
 | POST | `/api/match-by-path` | Match face(s) via server-side file/directory paths |
 | GET | `/api/download/{name}` | Download matched images as zip |
 
-## Model
+### Legacy config (`config.yml`)
 
-Uses **insightface** model zoo with ONNX Runtime. The default model is `buffalo_l` (configurable via `MODEL_NAME` in `config.yml`):
+```yaml
+model_name: buffalo_l
+output_root: output
+qdrant_collection_name: face_embeddings
 
-- **RetinaFace** for face detection (ONNX)
-- **ArcFace** (W600K-R50) for 512-dimensional face embeddings
-
-**Supported image formats:** JPG, PNG, WebP, BMP, HEIC, HEIF, TIFF, GIF, AVIF
-
-Models are downloaded automatically on first use from HuggingFace (`immich-app/buffalo_l`) to `~/.cache/immich_ml/buffalo_l/`.
+image_paths:
+  - "C:\\Users\\SHO\\Pictures\\D-days\\50-days"
+  # ...
+```
 
 ## Extending
 
-- **Storage**: Implement `EmbeddingRepository` (`save_all`, `upsert_batch`, `delete_by_dir`, `find_similar`)
-- **Multi-face centroid**: Upload multiple images — embeddings are averaged into a centroid for more robust matching
-- **Model**: Set `model_name: buffalo_s` in `config.yml` for faster but less accurate inference
-- **Embedding backend**: Implement `EmbeddingProvider` to swap in a different model
+- **Storage**: implement `EmbeddingRepository` (`save_all`, `upsert_batch`, `delete_by_dir`, `find_similar`)
+- **Multi-face centroid**: upload multiple images — embeddings are averaged into a centroid for more robust matching
+- **Model**: set `model_name: buffalo_s` in `config.yml` for faster but less accurate inference
+- **Embedding backend**: implement `EmbeddingProvider` to swap in a different model
