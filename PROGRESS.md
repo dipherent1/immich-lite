@@ -14,7 +14,7 @@ Tracks completed work against [PHASES.md](PHASES.md). See [TODO.md](TODO.md) for
 - **`core/security.py`** — password hashing via `pwdlib[bcrypt]` (`BcryptHasher` explicitly, not `PasswordHash.recommended()` which defaults to argon2), plus JWT encode/decode via `PyJWT` (HS256, sub/iat/exp claims).
 - **`repositories/user_repository.py`** — `UserRepository` class (DB session injected) owns all `users` table access: `get_by_id`, `get_by_email`, `create`.
 - **`services/user_service.py`** — `UserService` class owns the business logic and raises `HTTPException` for errors: `register` (409 dupe), `authenticate` (401), `get_by_id`. No DB or raw SQL in the service.
-- **`api/deps.py`** — `get_user_repository` / `get_user_service` dependency factories, plus `get_current_user`: `OAuth2PasswordBearer` → decode token → load user via the service/repo; raises 401 with `WWW-Authenticate` on any failure.
+- **`api/deps.py`** — `get_user_repository` / `get_user_service` dependency factories, plus `get_current_user`: `HTTPBearer` (simple "paste token" scheme, `auto_error=False`) → decode token → load user via the service/repo; raises 401 with `WWW-Authenticate` on any failure.
 - **`api/v1/endpoints/auth.py`** — thin router: `POST /api/v1/auth/register` (201/409), `POST /api/v1/auth/login` (200/401); each delegates to `UserService` via `Depends(get_user_service)`.
 - **`api/v1/endpoints/users.py`** — thin: `GET /api/v1/users/me` (protected, returns `current_user`).
 - **`schemas/`** — `auth.py` (`RegisterRequest`, `LoginRequest`, `TokenResponse`) and `user.py` (`UserResponse`); `EmailStr` requires `email-validator`.
@@ -37,6 +37,37 @@ Tracks completed work against [PHASES.md](PHASES.md). See [TODO.md](TODO.md) for
 ### Notes / environment quirks
 
 - The shared `get_db` dependency yields a **plain SQLAlchemy `Session`** (not `sqlmodel.Session`), so `db.exec()` is unavailable — endpoints use `db.scalars(select(...))` / `db.get(...)` instead.
+
+## 🖥 Frontend — auth UI (Next.js)
+
+> Supporting work for Phase 1 (not a numbered backend phase). Lets users register / log in through a browser.
+
+**Status:** Working locally via `npm run dev` (`http://localhost:3000`). Backend container not yet rebuilt with CORS (login fails with a CORS error until then).
+
+### What was done
+
+- **Scaffolded** `frontend/` — Next.js 16.3.3 (App Router, TypeScript, Turbopack, ESLint, `@/*` alias, `src/` dir). Node 24 / npm 11 host.
+- **`lib/api.ts`** — the single reusable API client:
+  - Owns the FastAPI base URL from `NEXT_PUBLIC_API_URL` (`.env.local` → `http://localhost:8080`).
+  - Owns the JWT in `localStorage` and attaches `Authorization: Bearer <token>` automatically.
+  - Exposes `login`, `register`, `getMe`, `logout`, `isAuthenticated`, `ApiError`.
+  - **Isolation contract:** components/pages never touch `localStorage`, never build `Authorization` headers, never hardcode the URL.
+  - **Future-secure seam:** to switch to HttpOnly cookies + a Next.js proxy later, only this module changes (base URL becomes relative, token read from cookie) — app components are untouched.
+- **`components/RequireAuth.tsx`** — client guard; redirects to `/login` when not authenticated.
+- **`components/LoginForm.tsx` / `RegisterForm.tsx`** — thin forms calling `lib/api`; show `ApiError.detail` on failure; register redirects to `/login` (backend register returns the user, not a token).
+- **Pages** — `/` (landing links), `/login`, `/register`, `/dashboard` (protected: fetches `getMe()`, logout button).
+- **Backend CORS** — `CORS` middleware in `src/app/main.py`; `allow_origins` from new `cors_origins` setting (default `http://localhost:3000`). Verified preflight returns `access-control-allow-origin`.
+- **`frontend/.env.local`** — `NEXT_PUBLIC_API_URL=http://localhost:8080` (gitignored by the created `frontend/.gitignore`? — confirm).
+
+### Verified
+
+- ✅ `npm run build` passes (TypeScript + all routes: `/`, `/login`, `/register`, `/dashboard`).
+- ✅ `next dev` serves `http://localhost:3000` (status 200); pages render.
+- ⚠️ Register/login via the UI needs the backend Docker app rebuilt (CORS change not yet in the running container).
+
+### To do next
+
+- Rebuild/restart the backend app container with CORS + the real `JWT_SECRET` to enable end-to-end UI login.
 
 ## ✅ Phase 0 — Repo restructure, no behavior change
 
