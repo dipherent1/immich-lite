@@ -30,6 +30,9 @@ class Settings(BaseSettings):
 
     output_root: str = "output"
 
+    # Comma-separated list of allowed browser origins for CORS (e.g. the Next.js frontend).
+    cors_origins: str = "http://localhost:3000"
+
     # Loaded from the JWT_SECRET env var / .env. None means "not configured" —
     # callers should refuse or use a dev-only fallback, never a hardcoded secret here.
     jwt_secret: str | None = os.getenv("JWT_SECRET")

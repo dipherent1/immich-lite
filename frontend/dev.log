@@ -1,0 +1,24 @@
+
+> frontend@0.1.0 dev
+> next dev
+
+▲ Next.js 16.3.3 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://10.0.0.185:3000
+- Environments: .env.local
+✓ Ready in 1697ms
+✓ Running next.config.ts took 93ms
+
+○ Compiling / ...
+ GET / 200 in 3.8s (next.js: 3.6s, application-code: 274ms)
+ GET / 200 in 113ms (next.js: 33ms, application-code: 80ms)
+ GET /login 200 in 649ms (next.js: 610ms, application-code: 39ms)
+ GET / 200 in 133ms (next.js: 13ms, application-code: 119ms)
+ GET / 200 in 122ms (next.js: 17ms, application-code: 105ms)
+ GET /dashboard 200 in 425ms (next.js: 377ms, application-code: 48ms)
+ GET /login 200 in 137ms (next.js: 14ms, application-code: 123ms)
+ GET /dashboard 200 in 211ms (next.js: 98ms, application-code: 113ms)
+ GET /login 200 in 92ms (next.js: 32ms, application-code: 60ms)
+ GET /register 200 in 1191ms (next.js: 931ms, application-code: 260ms)
+ GET /login 200 in 49ms (next.js: 16ms, application-code: 32ms)
+ GET /dashboard 200 in 42ms (next.js: 13ms, application-code: 29ms)
