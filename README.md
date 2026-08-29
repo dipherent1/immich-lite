@@ -6,16 +6,16 @@ The project is being rebuilt around a phased plan (see [PHASES.md](PHASES.md)). 
 
 ## Status
 
-| Phase | Description | Status |
-|---|---|---|
-| 0 | Repo restructure, no behavior change | ✅ Done |
-| 1 | Accounts & Auth | ⬜ Todo |
-| 2 | Face Profile Enrollment | ⬜ Todo |
-| 3 | Events | ⬜ Todo |
-| 4 | Photo Ingestion Pipeline | ⬜ Todo |
-| 5 | Matching & Delivery | ⬜ Todo |
-| 6 | Notifications (optional) | ⬜ Todo |
-| 7 | Hardening & Ops | ⬜ Todo |
+| Phase | Description                          | Status  |
+| ----- | ------------------------------------ | ------- |
+| 0     | Repo restructure, no behavior change | ✅ Done |
+| 1     | Accounts & Auth                      | ⬜ Todo |
+| 2     | Face Profile Enrollment              | ⬜ Todo |
+| 3     | Events                               | ⬜ Todo |
+| 4     | Photo Ingestion Pipeline             | ⬜ Todo |
+| 5     | Matching & Delivery                  | ⬜ Todo |
+| 6     | Notifications (optional)             | ⬜ Todo |
+| 7     | Hardening & Ops                      | ⬜ Todo |
 
 See [PROGRESS.md](PROGRESS.md) for what's done and [TODO.md](TODO.md) for what's next.
 
@@ -63,7 +63,14 @@ immich-lite/
 docker compose up -d
 ```
 
+### Update the code only
+
+```bash
+docker compose up -d --build app
+```
+
 This starts:
+
 - **Qdrant** vector database (host ports `8090` REST / `8100` gRPC)
 - **PostgreSQL** (host port `5433`)
 - **Immich Lite** API server on host port `8080` (maps to the container's 8000)
@@ -142,9 +149,9 @@ alembic revision --autogenerate -m "describe change"
 
 ## API Endpoints
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/ping` | Health check |
+| Method | Path    | Description  |
+| ------ | ------- | ------------ |
+| GET    | `/ping` | Health check |
 
 (Routes for auth, users, events, photos, and matches are added in later phases under `/api/v1/...`.)
 
@@ -181,14 +188,14 @@ python run_api.py
 
 ### Legacy endpoints
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/` | Service info |
-| GET | `/ping` | Health check |
-| GET | `/scan` | Webcam capture UI |
-| POST | `/api/match` | Match face(s) via uploaded images (up to 3, centroid) |
-| POST | `/api/match-by-path` | Match face(s) via server-side file/directory paths |
-| GET | `/api/download/{name}` | Download matched images as zip |
+| Method | Path                   | Description                                           |
+| ------ | ---------------------- | ----------------------------------------------------- |
+| GET    | `/`                    | Service info                                          |
+| GET    | `/ping`                | Health check                                          |
+| GET    | `/scan`                | Webcam capture UI                                     |
+| POST   | `/api/match`           | Match face(s) via uploaded images (up to 3, centroid) |
+| POST   | `/api/match-by-path`   | Match face(s) via server-side file/directory paths    |
+| GET    | `/api/download/{name}` | Download matched images as zip                        |
 
 ### Legacy config (`config.yml`)
 

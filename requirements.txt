@@ -18,3 +18,8 @@ sqlmodel>=0.0.42
 alembic>=1.13.0
 pydantic-settings>=2.0.0
 psycopg2-binary>=2.9.0
+
+# Phase 1 auth
+pwdlib[bcrypt]>=0.3.0
+PyJWT>=2.8.0
+email-validator>=2.0.0

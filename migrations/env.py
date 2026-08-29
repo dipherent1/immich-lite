@@ -15,6 +15,8 @@ if str(_SRC) not in sys.path:
 from app.core.config import get_settings
 from app.core.database import Base
 
+import app.models  # noqa: F401  (registers ORM models with the shared metadata for autogenerate)
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
