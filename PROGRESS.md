@@ -57,7 +57,7 @@ Tracks completed work against [PHASES.md](PHASES.md). See [TODO.md](TODO.md) for
 - **`components/LoginForm.tsx` / `RegisterForm.tsx`** — thin forms calling `lib/api`; show `ApiError.detail` on failure; register redirects to `/login` (backend register returns the user, not a token).
 - **Pages** — `/` (landing links), `/login`, `/register`, `/dashboard` (protected: fetches `getMe()`, logout button).
 - **Backend CORS** — `CORS` middleware in `src/app/main.py`; `allow_origins` from new `cors_origins` setting (default `http://localhost:3000`). Verified preflight returns `access-control-allow-origin`.
-- **`frontend/.env.local`** — `NEXT_PUBLIC_API_URL=http://localhost:8080` (gitignored by the created `frontend/.gitignore`? — confirm).
+- **`frontend/.env.local`** — `NEXT_PUBLIC_API_URL=http://localhost:8080` (gitignored via `frontend/.gitignore` `.env*`).
 
 ### Verified
 
@@ -68,6 +68,32 @@ Tracks completed work against [PHASES.md](PHASES.md). See [TODO.md](TODO.md) for
 ### To do next
 
 - Rebuild/restart the backend app container with CORS + the real `JWT_SECRET` to enable end-to-end UI login.
+
+## 🪵 Backend logging
+
+**Goal:** findable logs across the whole backend — console + rotating file, every request, and errors with full tracebacks. No secrets ever logged.
+
+### What was done
+
+- **`core/logging.py`** — single `setup_logging()` config: console + `RotatingFileHandler` at `logs/app.log` (5 MB, 3 backups), level from `LOG_LEVEL` (default `INFO`). Idempotent (no duplicate handlers).
+- **`core/middleware.py`** — `RequestLoggingMiddleware`: logs every HTTP request as `method path -> status (duration ms)` with the authenticated `user=<id>` when present; skips well-known endpoints (`/ping`, `/docs`, etc.). 5xx logged at ERROR, 4xx at WARNING, else INFO. Re-raises unhandled exceptions after logging.
+- **`main.py`** — calls `setup_logging()` at startup; adds the middleware; adds a global `@app.exception_handler(Exception)` that logs any uncaught error **with its full traceback** (`exc_info=True`) and returns a generic 500 (no internal leak).
+- **`api/deps.py`** — `get_current_user` logs WARNING on auth failures (missing / invalid / expired token, unknown user); stamps `request.state.user_id` so the middleware can surface the user. **Token value never logged.**
+- **`services/user_service.py`** — INFO on register success / login success (user id); WARNING on duplicate-email and failed login (email only); the `register` `except Exception` now uses `logger.exception(...)` so the **real underlying error is logged with a traceback** (previously swallowed).
+- **`core/config.py`** — new settings: `log_level`, `log_file`, `log_max_bytes`, `log_backup_count`.
+- **`.gitignore`** — added `logs/`.
+- `embedding_service.py` / `vector_db.py` already had good module loggers — left unchanged.
+
+### Verified
+
+- ✅ Console + `logs/app.log` both receive structured lines (`app`, `app.user`, `app.auth`, `app.request`).
+- ✅ Every HTTP call logged with method/path/status/duration; `user=<id>` on authenticated routes.
+- ✅ Login failure → WARNING (email, no password); invalid token → WARNING.
+- ✅ Forced 500 (unhandled `RuntimeError`) → full `Traceback` written to the log file, generic `500` to client.
+
+### Notes
+
+- Log file path is resolved relative to the project root and is runtime-only (`logs/` is gitignored).
 
 ## ✅ Phase 0 — Repo restructure, no behavior change
 

@@ -69,6 +69,12 @@ docker compose up -d
 docker compose up -d --build app
 ```
 
+### To see the logs
+
+```bash
+docker logs -f immich-lite-app
+```
+
 This starts:
 
 - **Qdrant** vector database (host ports `8090` REST / `8100` gRPC)

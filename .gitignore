@@ -5,6 +5,7 @@ __pycache__/
 *.pyo
 embeddings.json
 output/
+logs/
 qdrant_storage/
 graphify-out/
 .opencode/
