@@ -15,46 +15,75 @@ Rules:
 
 ### Directory structure
 
-Migrate/grow into this layout. Keep the existing `insightface`/ArcFace embedding code and Qdrant client — relocate them, don't rewrite them.
+Grow into this layout, keeping the existing `insightface`/ArcFace embedding code and Qdrant client — relocate them, don't rewrite them. This reflects the current live structure (Phase 0/1 + frontend).
 
 ```text
 alembic.ini                         # Alembic config (root, alongside docker-compose.yml)
 migrations/
 │   ├── env.py                      # points at the app's SQLAlchemy/SQLModel metadata
 │   └── versions/                   # one file per schema change, named by phase
+frontend/                           # Next.js (App Router, TS) — see notes below
 src/
 ├── app/
 │   ├── api/
 │   │   ├── v1/
 │   │   │   ├── endpoints/
-│   │   │   │   ├── auth.py
-│   │   │   │   ├── users.py          # profile scan + re-scan
-│   │   │   │   ├── events.py         # create/join/list events
-│   │   │   │   ├── photos.py         # upload + retrieval
-│   │   │   │   └── matches.py        # per-user matched-photo feed
-│   │   │   └── api.py                # aggregates routers
+│   │   │   │   ├── auth.py         # register/login (thin)
+│   │   │   │   ├── users.py        # profile scan + re-scan
+│   │   │   │   ├── events.py       # create/join/list events
+│   │   │   │   ├── photos.py       # upload + retrieval
+│   │   │   │   └── matches.py      # per-user matched-photo feed
+│   │   │   └── api.py              # aggregates routers
+│   │   └── deps.py                 # DI wiring: get_db, get_user_service/repo, get_current_user
 │   ├── core/
-│   │   ├── config.py                 # Pydantic BaseSettings (env vars)
-│   │   ├── database.py               # relational DB session (Postgres)
-│   │   ├── security.py               # password hashing, JWT
-│   │   └── vector_db.py              # Qdrant client/session wrapper
-│   ├── models/                       # SQLAlchemy/SQLModel ORM models
+│   │   ├── config.py               # Pydantic BaseSettings (env vars) + load_dotenv
+│   │   ├── database.py             # relational DB session (Postgres)
+│   │   ├── security.py             # password hashing (pwdlib[bcrypt]), JWT (PyJWT)
+│   │   ├── logging.py              # setup_logging(): console + rotating file; log_exception helpers
+│   │   ├── middleware.py           # RequestLoggingMiddleware (method/path/status/duration/user)
+│   │   └── vector_db.py            # Qdrant client/session wrapper
+│   ├── domain/                     # shared value types & interfaces (Phase 0): entities, interfaces
+│   ├── models/                     # SQLAlchemy/SQLModel ORM models
 │   │   ├── user.py
 │   │   ├── event.py
 │   │   ├── event_attendee.py
 │   │   ├── photo.py
 │   │   └── photo_match.py
-│   ├── schemas/                      # Pydantic request/response DTOs
-│   ├── services/                     # business logic, framework-agnostic
-│   │   ├── embedding_service.py      # wraps existing InsightFace code
-│   │   ├── profile_service.py        # enroll/update a user's face vector
-│   │   ├── event_service.py          # event lifecycle, join logic
-│   │   ├── ingestion_service.py      # photo -> faces -> embeddings
-│   │   └── matching_service.py       # vector search scoped to attendees
-│   ├── workers/                      # background/async job entry points
-│   │   └── photo_worker.py           # embed + match a single uploaded photo
-│   └── main.py
+│   ├── repositories/               # DB access layer (one class per aggregate)
+│   │   └── user_repository.py      # all `users` SQLAlchemy access
+│   ├── schemas/                    # Pydantic request/response DTOs
+│   ├── services/                   # business logic, framework-agnostic
+│   │   ├── user_service.py         # register/authenticate/get_by_id (HTTPException on error)
+│   │   ├── embedding_service.py    # wraps existing InsightFace code
+│   │   ├── profile_service.py      # enroll/update a user's face vector
+│   │   ├── event_service.py        # event lifecycle, join logic
+│   │   ├── ingestion_service.py    # photo -> faces -> embeddings
+│   │   └── matching_service.py     # vector search scoped to attendees
+│   ├── workers/                    # background/async job entry points
+│   │   └── photo_worker.py         # embed + match a single uploaded photo
+│   └── main.py                     # app factory: CORS + request logging + unhandled-error handler
 ```
+
+### Layering (routers → services → repositories → models)
+
+- **Routers** (`api/v1/endpoints/*`) are thin: parse the request, call a service via `Depends(...)`, return a `response_model`. No DB, no raw SQL, no vector logic in `api/`.
+- **Services** (`services/*`) own the business rules and raise `HTTPException` on errors (never leak DB exceptions or internals).
+- **Repositories** (`repositories/*`) own ALL database access — a class per aggregate that takes the injected session (e.g. `UserRepository(db)`). This is the only layer with raw SQLAlchemy/SQLModel queries.
+- **`api/deps.py`** wires DI: `get_db`, `get_user_repository`, `get_user_service`, `get_current_user`. No global state, no manual singletons.
+
+### Frontend
+
+- Located in `frontend/` (Next.js 16, App Router, TypeScript, `@/*` alias, `src/`).
+- **`frontend/src/lib/api.ts` is the single API client** — it owns the FastAPI base URL (`NEXT_PUBLIC_API_URL`) and attaches `Authorization: Bearer <token>` from `localStorage`. Components never touch `localStorage`, never build auth headers, never hardcode the URL.
+- To later move auth to HttpOnly cookies + a Next.js proxy, change only `lib/api.ts` (base URL becomes relative, token read from a cookie) — application components stay untouched.
+- Protected pages use the `RequireAuth` client guard (`frontend/src/components/RequireAuth.tsx`).
+
+### Logging
+
+- All logging goes through Python's stdlib `logging`, configured once by `core/logging.setup_logging()` (console + rotating file `logs/`).
+- A request-logging middleware logs every HTTP call (method/path/status/duration + `user=<id>` when authenticated); 5xx at ERROR, 4xx at WARNING.
+- A global unhandled-exception handler logs the full traceback and returns a generic 500.
+- **Never log passwords, JWT tokens, or password hashes.**
 
 ### Coding rules (unchanged from the original convention, keep enforcing these)
 
@@ -62,6 +91,7 @@ src/
 - **Explicit status codes** on every route decorator.
 - **response_model everywhere** — never leak ORM objects or password hashes.
 - **Services layer owns logic** — embedding, matching, and event-membership rules live in `services/`, not in routes or workers.
+- **Repositories own DB access** — no raw SQL outside `repositories/`.
 - **Dependency injection** via `Depends()` for DB sessions, current user, Qdrant client. No global state, no manual singletons.
 - **Pydantic v2**, separate `*Create` / `*Response` schemas.
 - **Async endpoints** for I/O-bound routes (DB, Qdrant, file upload). Use plain `def` (or a thread/worker offload) for the CPU-bound face-detection/embedding step so it doesn't block the event loop.
