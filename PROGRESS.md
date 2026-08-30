@@ -42,7 +42,7 @@ Tracks completed work against [PHASES.md](PHASES.md). See [TODO.md](TODO.md) for
 
 > Supporting work for Phase 1 (not a numbered backend phase). Lets users register / log in through a browser.
 
-**Status:** Working locally via `npm run dev` (`http://localhost:3000`). Backend container not yet rebuilt with CORS (login fails with a CORS error until then).
+**Status:** Working locally via `npm run dev` (`http://localhost:3000`), talking to the rebuilt backend container (CORS + real `JWT_SECRET` active).
 
 ### What was done
 
@@ -63,11 +63,11 @@ Tracks completed work against [PHASES.md](PHASES.md). See [TODO.md](TODO.md) for
 
 - ✅ `npm run build` passes (TypeScript + all routes: `/`, `/login`, `/register`, `/dashboard`).
 - ✅ `next dev` serves `http://localhost:3000` (status 200); pages render.
-- ⚠️ Register/login via the UI needs the backend Docker app rebuilt (CORS change not yet in the running container).
+- ✅ Backend container rebuilt with CORS + real `JWT_SECRET`; preflight returns `access-control-allow-origin: http://localhost:3000`; register/login/me work end-to-end from the browser/API against `http://localhost:8080`.
 
-### To do next
+### Notes
 
-- Rebuild/restart the backend app container with CORS + the real `JWT_SECRET` to enable end-to-end UI login.
+- `frontend/dev.log` was accidentally committed early on — now untracked and gitignored (`dev.log*`, `*.local.log`).
 
 ## 🪵 Backend logging
 
@@ -94,6 +94,43 @@ Tracks completed work against [PHASES.md](PHASES.md). See [TODO.md](TODO.md) for
 ### Notes
 
 - Log file path is resolved relative to the project root and is runtime-only (`logs/` is gitignored).
+
+## ✅ Phase 2 — Face Profile Enrollment ("get scanned")
+
+**Goal:** An authenticated user submits face image(s) → their permanent profile vector.
+**Status:** Complete. All stop conditions verified.
+
+### What was done
+
+- **`services/profile_service.py`** — `ProfileService`: for each submitted image, `detect_and_embed`, collects every face's 512-dim vector across all images, computes the **centroid (`np.mean`)** (reusing the original matcher's multi-image averaging), and upserts it as the user's profile. Raises 422 when no face is found or an image can't be decoded.
+- **`core/vector_db.py`** — added `QdrantProfileRepository` (new `user_profiles` collection, 512-dim COSINE, `user_id` keyword-payload index):
+  - `upsert_profile(user_id, vector)` — point `id == user_id`, so **re-scanning overwrites** the previous vector (no lookup needed).
+  - `has_profile(user_id) -> bool` — via `retrieve`.
+  - Reuses the same Qdrant client pattern as the existing `QdrantEmbeddingRepository` (kept the file-based `face_embeddings` repo untouched).
+- **`api/deps.py`** — new DI factories: `get_profile_repository`, `get_profile_service`, and `get_embedding_service` (an `@lru_cache`-d shared, lazily-loaded `InsightFaceEmbeddingService(model_name=settings.model_name)` so the model loads once per process — no module-global singleton).
+- **`api/v1/endpoints/users.py`**:
+  - `POST /api/v1/users/me/scan` — accepts **1–3 images** (`multipart/form-data`, field `files`); **plain `def`** endpoint so the CPU-bound face detection/embedding runs in FastAPI's threadpool, not the event loop. Returns `ScanResponse {images_processed, faces_found, profile_upserted}`.
+  - `GET /api/v1/users/me` — now returns `has_face_profile` (the boolean, never the vector).
+- **`schemas/user.py`** — `UserResponse` gained `has_face_profile: bool = False` (so register/login serialize new users correctly).
+- **`schemas/profile.py`** — `ScanResponse`.
+- **Frontend** — `frontend/src/components/FaceScan.tsx` (final flow: dashboard shows only a **"Scan face"** button; clicking it opens the live mirrored camera; a guided **Front → Left → Right** capture takes 3 photos; once all 3 are captured they upload automatically via `scanFace()` and show a success/done state). Wired into `/dashboard`. `lib/api.ts` now supports `multipart/form-data` (single API client) and exposes `scanFace()` + `has_face_profile` on `getMe()`.
+
+### Stop-condition verification (against the rebuilt Docker container, Qdrant on `localhost:8090`)
+
+- ✅ Register a new user → `/users/me` returns `has_face_profile: false`.
+- ✅ `POST /users/me/scan` with a face image → `{"images_processed":1, "faces_found":6, "profile_upserted":true}`.
+- ✅ `/users/me` after scan → `has_face_profile: true`.
+- ✅ Re-scan (multi-image) → 200, overrides the stored vector (upsert).
+- ✅ Single image with **no detectable face** → 422 `"No face detected in the submitted image(s)"`.
+- ✅ Qdrant `user_profiles` contains exactly **1 point per user**, `id == user_id`, `payload.user_id == user_id`, 512-dim vector.
+- ✅ Backend container rebuilt (`docker compose up -d --build app`) with the Phase 2 code.
+
+### Notes
+
+- Test face image used: `insightface/data/images/t1.jpg` (6 faces detected). `Tom_Hanks_54745.png` reports 0 faces at the detection threshold — confirmed via a direct embedder run that this is the image, not the wiring.
+- Profiles hold a single centroid vector; the per-image source photo is **not** persisted (photo storage is Phase 4).
+- **User id is not exposed to the frontend.** The id is always derived server-side from the JWT (`decode_access_token` → `sub` → `get_current_user`); no protected route trusts a client-supplied id. `UserResponse` exposes only `email`, `display_name`, `created_at`, `has_face_profile` (the raw `id` field was removed from the schema, the `/users/me` response, and the dashboard). Re-scanning always **overwrites** (never accumulates) the profile vector.
+- **Camera fix:** the live `<video>` was not being wired to the MediaStream (black frame) — the stream is now attached via an effect keyed on `camOn` once the video element mounts. The upload is triggered directly from `capture()` on the 3rd photo (a prior `useEffect` cleanup was cancelling the in-flight upload, leaving it stuck on "Storing your face…"). Frontend `console.log`/`console.error` traces were added (`[FaceScan] ...`, `[api] ...`) for debugging.
 
 ## ✅ Phase 0 — Repo restructure, no behavior change
 

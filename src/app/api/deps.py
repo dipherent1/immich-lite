@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlmodel import Session
 
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import decode_access_token
+from app.core.vector_db import QdrantProfileRepository
 from app.models.user import User
 from app.repositories.user_repository import UserRepository
+from app.services.embedding_service import InsightFaceEmbeddingService
+from app.services.profile_service import ProfileService
 from app.services.user_service import UserService
 
 logger = logging.getLogger("app.auth")
@@ -23,6 +28,27 @@ def get_user_repository(db: Session = Depends(get_db)) -> UserRepository:
 
 def get_user_service(repository: UserRepository = Depends(get_user_repository)) -> UserService:
     return UserService(repository)
+
+
+@lru_cache
+def get_embedding_service() -> InsightFaceEmbeddingService:
+    """Shared, lazily-loaded embedding service (model loads once per process)."""
+    settings = get_settings()
+    return InsightFaceEmbeddingService(
+        model_name=settings.model_name,
+        detection_threshold=settings.detection_threshold,
+    )
+
+
+def get_profile_repository() -> QdrantProfileRepository:
+    return QdrantProfileRepository(url=get_settings().qdrant_url)
+
+
+def get_profile_service(
+    embedder: InsightFaceEmbeddingService = Depends(get_embedding_service),
+    profiles: QdrantProfileRepository = Depends(get_profile_repository),
+) -> ProfileService:
+    return ProfileService(embedder, profiles)
 
 
 def get_current_user(

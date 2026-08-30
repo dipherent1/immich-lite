@@ -20,6 +20,61 @@ def _point_id(image_path: str) -> str:
     return hashlib.md5(image_path.encode()).hexdigest()
 
 
+class QdrantProfileRepository:
+    """One point per user in the `user_profiles` collection: id == user_id.
+
+    Built on the same Qdrant client pattern as QdrantEmbeddingRepository but
+    for the profile store (a single 512-dim centroid per user). Re-scanning
+    simply upserts with the same point id, so the previous vector is replaced.
+    """
+
+    def __init__(
+        self,
+        url: str | None = None,
+        api_key: str | None = None,
+        collection_name: str = "user_profiles",
+    ) -> None:
+        self._url = url or os.environ.get("QDRANT_URL", "http://localhost:8090")
+        self._api_key = api_key or os.environ.get("QDRANT_API_KEY") or None
+        self._collection_name = collection_name
+        self._client = QdrantClient(url=self._url, api_key=self._api_key)
+        self._ensure_collection()
+
+    def _ensure_collection(self) -> None:
+        collections = self._client.get_collections().collections
+        exists = any(c.name == self._collection_name for c in collections)
+        if not exists:
+            self._client.create_collection(
+                collection_name=self._collection_name,
+                vectors_config=VectorParams(size=VECTOR_DIM, distance=Distance.COSINE),
+            )
+            self._client.create_payload_index(
+                collection_name=self._collection_name,
+                field_name="user_id",
+                field_schema="keyword",
+            )
+            logger.info("Created Qdrant collection: %s", self._collection_name)
+        else:
+            logger.debug("Qdrant collection already exists: %s", self._collection_name)
+
+    def upsert_profile(self, user_id: str, vector: list[float]) -> None:
+        self._client.upsert(
+            collection_name=self._collection_name,
+            points=[
+                PointStruct(
+                    id=user_id,
+                    vector=vector,
+                    payload={"user_id": user_id},
+                )
+            ],
+        )
+        logger.info("Upserted face profile for user id=%s", user_id)
+
+    def has_profile(self, user_id: str) -> bool:
+        points = self._client.retrieve(collection_name=self._collection_name, ids=[user_id])
+        return len(points) > 0
+
+
 class QdrantEmbeddingRepository(EmbeddingRepository):
     def __init__(
         self,

@@ -93,6 +93,7 @@ src/
 - **Services layer owns logic** — embedding, matching, and event-membership rules live in `services/`, not in routes or workers.
 - **Repositories own DB access** — no raw SQL outside `repositories/`.
 - **Dependency injection** via `Depends()` for DB sessions, current user, Qdrant client. No global state, no manual singletons.
+- **Never expose the user id.** The authenticated user's id is always derived server-side from the JWT (`decode_access_token` → `sub` → `get_current_user`); no route trusts a client-supplied id, and no `*Response` schema includes the raw id. Use the DB user object's `.id` only internally (token `sub`, vector/profile lookups, logging).
 - **Pydantic v2**, separate `*Create` / `*Response` schemas.
 - **Async endpoints** for I/O-bound routes (DB, Qdrant, file upload). Use plain `def` (or a thread/worker offload) for the CPU-bound face-detection/embedding step so it doesn't block the event loop.
 - **HTTPException only** for errors — no ad-hoc dict responses.

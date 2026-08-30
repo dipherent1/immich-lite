@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import RequireAuth from "@/components/RequireAuth";
+import FaceScan from "@/components/FaceScan";
 import { ApiError, getMe, logout, type UserResponse } from "@/lib/api";
 
 function DashboardContent() {
@@ -34,11 +35,12 @@ function DashboardContent() {
           <dd>{user.display_name}</dd>
           <dt>Email</dt>
           <dd>{user.email}</dd>
-          <dt>ID</dt>
-          <dd>{user.id}</dd>
         </dl>
       )}
-      <button onClick={handleLogout}>Log out</button>
+      <FaceScan />
+      <div style={{ marginTop: 24 }}>
+        <button onClick={handleLogout}>Log out</button>
+      </div>
     </main>
   );
 }

@@ -59,8 +59,10 @@ async function request<T>(
 ): Promise<T> {
   const { method = "GET", body, authenticated = false } = options;
 
+  const isForm = typeof FormData !== "undefined" && body instanceof FormData;
+
   const headers: Record<string, string> = {};
-  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (!isForm && body !== undefined) headers["Content-Type"] = "application/json";
   if (authenticated) {
     const token = getToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -69,8 +71,11 @@ async function request<T>(
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method,
     headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body:
+      body === undefined ? undefined : isForm ? body : JSON.stringify(body),
   });
+
+  console.log(`[api] ${method} ${path} -> ${res.status}`);
 
   if (!res.ok) {
     let detail = `${method} ${path} failed (${res.status})`;
@@ -89,15 +94,21 @@ async function request<T>(
 // --- Domain types ----------------------------------------------------------
 
 export interface UserResponse {
-  id: string;
   email: string;
   display_name: string;
   created_at: string;
+  has_face_profile: boolean;
 }
 
 interface TokenResponse {
   access_token: string;
   token_type: string;
+}
+
+export interface ScanResponse {
+  images_processed: number;
+  faces_found: number;
+  profile_upserted: boolean;
 }
 
 // --- Auth actions ----------------------------------------------------------
@@ -129,4 +140,18 @@ export async function register(
 /** Returns the currently authenticated user. */
 export async function getMe(): Promise<UserResponse> {
   return request<UserResponse>("/api/v1/users/me", { authenticated: true });
+}
+
+/** Uploads 1–3 face images and enrolls them as the user's profile vector. */
+export async function scanFace(images: File[]): Promise<ScanResponse> {
+  if (images.length < 1 || images.length > 3) {
+    throw new ApiError(422, "Please choose between 1 and 3 images.");
+  }
+  const form = new FormData();
+  for (const image of images) form.append("files", image);
+  return request<ScanResponse>("/api/v1/users/me/scan", {
+    method: "POST",
+    body: form,
+    authenticated: true,
+  });
 }
