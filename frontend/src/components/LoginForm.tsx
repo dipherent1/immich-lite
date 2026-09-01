@@ -18,7 +18,10 @@ export default function LoginForm() {
     setSubmitting(true);
     try {
       await login(email, password);
-      router.push("/dashboard");
+      // If the user came here to join an event (e.g. /login?next=/join/<token>),
+      // send them back there; otherwise go to the dashboard.
+      const next = new URLSearchParams(window.location.search).get("next");
+      router.push(next ?? "/dashboard");
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Something went wrong.");
     } finally {

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import RequireAuth from "@/components/RequireAuth";
 import FaceScan from "@/components/FaceScan";
+import EventsView from "@/components/EventsView";
 import { ApiError, getMe, logout, type UserResponse } from "@/lib/api";
 
 function DashboardContent() {
@@ -38,6 +39,7 @@ function DashboardContent() {
         </dl>
       )}
       <FaceScan />
+      <EventsView />
       <div style={{ marginTop: 24 }}>
         <button onClick={handleLogout}>Log out</button>
       </div>

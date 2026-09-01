@@ -12,8 +12,10 @@ from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.core.vector_db import QdrantProfileRepository
 from app.models.user import User
+from app.repositories.event_repository import EventRepository
 from app.repositories.user_repository import UserRepository
 from app.services.embedding_service import InsightFaceEmbeddingService
+from app.services.event_service import EventService
 from app.services.profile_service import ProfileService
 from app.services.user_service import UserService
 
@@ -49,6 +51,17 @@ def get_profile_service(
     profiles: QdrantProfileRepository = Depends(get_profile_repository),
 ) -> ProfileService:
     return ProfileService(embedder, profiles)
+
+
+def get_event_repository(db: Session = Depends(get_db)) -> EventRepository:
+    return EventRepository(db)
+
+
+def get_event_service(
+    repository: EventRepository = Depends(get_event_repository),
+    profiles: ProfileService = Depends(get_profile_service),
+) -> EventService:
+    return EventService(repository, profiles)
 
 
 def get_current_user(

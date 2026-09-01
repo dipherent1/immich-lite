@@ -111,6 +111,40 @@ export interface ScanResponse {
   profile_upserted: boolean;
 }
 
+export interface EventResponse {
+  id: string;
+  name: string;
+  join_token: string;
+  starts_at: string;
+  expires_at: string | null;
+  created_at: string;
+  active: boolean;
+}
+
+export interface EventPublicResponse {
+  id: string;
+  name: string;
+  starts_at: string;
+  expires_at: string | null;
+  created_at: string;
+  active: boolean;
+}
+
+export interface EventDetailResponse extends EventResponse {
+  attendee_count: number;
+}
+
+export interface EventJoinResponse {
+  event: EventResponse;
+  joined: boolean;
+}
+
+export interface CreateEventInput {
+  name: string;
+  starts_at?: string;
+  expires_at?: string | null;
+}
+
 // --- Auth actions ----------------------------------------------------------
 
 /** Logs in and stores the returned JWT. Resolves once authenticated. */
@@ -154,4 +188,51 @@ export async function scanFace(images: File[]): Promise<ScanResponse> {
     body: form,
     authenticated: true,
   });
+}
+
+// --- Events ----------------------------------------------------------------
+
+/** Creates an event (owner must already have a face profile). */
+export async function createEvent(
+  input: CreateEventInput,
+): Promise<EventResponse> {
+  const body: Record<string, unknown> = { name: input.name };
+  if (input.starts_at) body.starts_at = input.starts_at;
+  if (input.expires_at) body.expires_at = input.expires_at;
+  return request<EventResponse>("/api/v1/events", {
+    method: "POST",
+    body,
+    authenticated: true,
+  });
+}
+
+/** Lists the current user's owned/attended events (includes join_token). */
+export async function listMyEvents(): Promise<EventResponse[]> {
+  return request<EventResponse[]>("/api/v1/events", { authenticated: true });
+}
+
+/** Searches all events by partial name. Returns public details (no token). */
+export async function searchEvents(
+  q: string,
+): Promise<EventPublicResponse[]> {
+  return request<EventPublicResponse[]>(
+    `/api/v1/events/search?q=${encodeURIComponent(q)}`,
+    { authenticated: true },
+  );
+}
+
+/** Joins an event via its shareable join token/link. */
+export async function joinEvent(joinToken: string): Promise<EventJoinResponse> {
+  return request<EventJoinResponse>(
+    `/api/v1/events/join/${encodeURIComponent(joinToken)}`,
+    { authenticated: true },
+  );
+}
+
+/** Fetches details for one event (owner/attendee only). */
+export async function getEvent(eventId: string): Promise<EventDetailResponse> {
+  return request<EventDetailResponse>(
+    `/api/v1/events/${encodeURIComponent(eventId)}`,
+    { authenticated: true },
+  );
 }
