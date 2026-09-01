@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     qdrant_api_key: str | None = None
     qdrant_collection_name: str = "face_embeddings"
 
+    redis_url: str = "redis://localhost:6379/0"
+
     model_name: str = "buffalo_l"
     detection_threshold: float = 0.5
     similarity_threshold: float = 0.5

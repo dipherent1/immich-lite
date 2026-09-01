@@ -27,6 +27,11 @@ services:
       retries: 10
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    container_name: immich-lite-redis
+    restart: unless-stopped
+
   app:
     build: .
     container_name: immich-lite-app
@@ -35,17 +40,45 @@ services:
     volumes:
       - ./output:/app/output
       - ./config.yml:/app/config.yml
+      - immich_ml_cache:/root/.cache/immich_ml
     environment:
       - QDRANT_URL=http://qdrant:6333
       - DATABASE_URL=postgresql+psycopg2://immich:immich@postgres:5432/immich_lite
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - REDIS_URL=redis://redis:6379/0
+      - MODEL_NAME=buffalo_s
     depends_on:
       qdrant:
         condition: service_started
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  worker:
+    build: .
+    container_name: immich-lite-worker
+    command: ["python", "-m", "app.workers.photo_worker"]
+    volumes:
+      - ./output:/app/output
+      - immich_ml_cache:/root/.cache/immich_ml
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+      - DATABASE_URL=postgresql+psycopg2://immich:immich@postgres:5432/immich_lite
+      - REDIS_URL=redis://redis:6379/0
+      - MODEL_NAME=buffalo_s
+      - OUTPUT_ROOT=/app/output
+    depends_on:
+      qdrant:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     restart: unless-stopped
 
 volumes:
   qdrant_storage:
   postgres_storage:
+  immich_ml_cache:

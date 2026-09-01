@@ -150,6 +150,69 @@ Time window (simplest option from PHASES.md): an event is joinable when `starts_
 
 - Log file path is resolved relative to the project root and is runtime-only (`logs/` is gitignored).
 
+## ✅ Phase 4 — Photo Ingestion Pipeline
+
+**Goal:** Photos uploaded to an active event get face-detected + embedded in the background, scoped to that event, landing in Qdrant's `event_faces` collection. No matching yet.
+**Status:** Complete. All stop conditions verified.
+
+### What was done
+
+- **`models/photo.py`** — `Photo` (SQLModel): `id` (UUID PK), `event_id` (FK), `uploader_user_id` (FK), `storage_path`, `status` (`pending`/`processed`/`failed`), `uploaded_at`, `processed_at`. Registered in `models/__init__.py`.
+- **Migration `migrations/versions/0003_create_photos.py`** — Alembic creates the `photos` table + indexes; applies and rolls back cleanly. (Hand-written to match the existing auto-generated style; the DB isn't exposed on a host port so autogenerate in-container was avoided.)
+- **`core/file_storage.py`** — `LocalFileService` (implements the existing `FileService` ABC in `domain/interfaces.py`, extended with `read`/`abs_path`):
+  - Photos stored once under a single root (`output/photos/{event_id}/{photo_id}.jpg`) at the **relative** path returned to callers — nothing is ever copied for matching/delivery (Phase 5 will just resolve that same path).
+  - Path-traversal guard (`is_relative_to` root); `s3`/object-store backend can swap in later without touching the worker or DB.
+- **`core/vector_db.py`** — added `EventFaceRepository` (new `event_faces` collection, 512-dim COSINE, keyword payload indexes on `event_id` + `photo_id`):
+  - `upsert_faces(event_id, photo_id, embeddings)` — one point per face with a **fresh UUID id** (a photo can hold several faces), payload `{event_id, photo_id, bbox_x1..y2, face_score}`.
+- **`repositories/photo_repository.py`** — `PhotoRepository` (create / get / set_status / list_pending / list_for_event).
+- **`services/ingestion_service.py`** — `IngestionService`: reads the stored photo by `storage_path` (never copies), `detect_and_embed`, upserts per-face points into `event_faces`, marks `Photo.status=processed` (or `failed` on error). CPU-bound — runs in the worker process, not the event loop.
+- **`services/photo_service.py`** — `PhotoService.upload(user_id, event_id, filename, data)`: business rules for upload — 413 over 20 MB, 404 unknown event, 403 non-member, 410 inactive event, 422 unsupported type; saves the file once, creates the `pending` Photo row, enqueues the worker job. (Never leaks `uploader_user_id` in responses.)
+- **`workers/photo_worker.py`** — RQ worker (`main()` starts a Worker on queue `photos`). Job `process_photo(photo_id)` builds fresh deps per job (own DB session — closed in `finally`; lazily-loaded embedder) so failures never leak across photos.
+- **`core/jobs.py`** — `enqueue_photo_processing(photo_id)` — thin API-side helper that pushes the job onto RQ queue `photos` (Redis). Logs loudly if the queue is unreachable.
+- **Endpoint `POST /api/v1/events/{id}/photos`** — `UploadFile` multipart → `PhotoUploadResponse {id, event_id, storage_path, status, uploaded_at}` (201). Plain `def`, non-blocking (the heavy work is offloaded to the worker).
+- **DI** (`api/deps.py`) — `get_photo_repository`, `get_file_service`, `get_photo_service`.
+- **Infra (docker-compose)** — added a **`redis`** service (internal network only, no host port — host 6379 was already owned) and a **`worker`** service (same image, `python -m app.workers.photo_worker`, `depends_on` qdrant+postgres+redis). `app` + `worker` share the `./output` mount and a new **`immich_ml_cache`** volume (model cache at `/root/.cache/immich_ml`), plus `REDIS_URL` and `MODEL_NAME=buffalo_s` env.
+- **`Dockerfile`** — build-time model pre-cache is now best-effort (`|| true`) and uses `buffalo_s` (matches runtime); a cold no-network build still succeeds and models download at first run.
+- **`requirements.txt`** — added `redis>=5.0.0`, `rq>=1.16.0`.
+
+### Stop-condition verification (rebuilt stack on `docker compose up -d --build`, API on `localhost:8080`, Qdrant on `localhost:8090`)
+
+- ✅ `docker compose up -d --build` starts **redis**, **worker** ("Listening on photos..."), and **app** healthily.
+- ✅ `alembic upgrade head` applies `0003_create_photos`; `photos` table created.
+- ✅ Uploaded a face photo to an active event as a member → `201`, `PhotoUploadResponse{status:"pending"}`.
+- ✅ Within ~2s the worker flipped the row to **`status=processed`** (with `processed_at`).
+- ✅ Qdrant `event_faces` (green/ready) gained the expected **1 point** with correct scope: fresh UUID id, `event_id`, `photo_id`, `bbox`, `face_score`.
+- ✅ Migration rolls back cleanly (`alembic downgrade -1` drops `photos`) and re-applies cleanly (`upgrade head` recreates it).
+
+### Notes
+
+- **No duplication rule:** an uploaded photo is stored once; its `storage_path` (per-event folder) is referenced everywhere. When Phase 5 matching links a photo to a person it will resolve/return that same path — it will not copy the file and store a second copy.
+- The previous test-upload row/Qdrant point were removed when we verified the `downgrade` (expected).
+- `# NOTE` in `workers/photo_worker.py:process_photo` marks where a heavier async pipeline would slot in if volume grows.
+- The pre-existing infra quirk: the running Postgres container wasn't exposing host port 5433 (only the app container's internal `postgres:5432` is used), so Alembic runs inside the app container (`docker compose exec app alembic ...`).
+
+### Phase 4.5 — Photo list & grid on the event preview page
+
+**Goal:** event members can view an event's uploaded photos from `/events/[id]`, paginated (offset-based, newest first), via a reusable component that also serves the Phase 5 matched-photo feed.
+
+**Backend** (in `events.py` + `photo_service.py` + `photo_repository.py`):
+- `GET /api/v1/events/{id}/photos?offset=&limit=` (200) — member-only; offset-paginated, returns `PhotoListResponse {items, has_more, next_offset}`. `list_for_event` fetches `limit+1` rows to compute `has_more`. Items are `PhotoResponse {id, event_id, status, uploaded_at, file_url}` — **no `storage_path`, no uploader id**, and `file_url` is a relative path the frontend prefixes with its API base URL.
+- `GET /api/v1/events/{id}/photos/{photo_id}/file` (200) — member-only; streams the stored image bytes as `image/jpeg` via `PhotoService.get_photo_file`.
+- Both routes reuse `_ensure_member` (403 for non-members, 401 unauthenticated). `PhotoService.list_for_event` / `get_photo_file` are the thin service methods.
+
+**Frontend**:
+- `lib/api.ts` — new `PhotoResponse`/`PhotoListResponse` types, `getEventPhotos(eventId, offset, limit)` and `getEventPhotoObjectUrl(eventId, photoId)`. The object-URL helper uses the existing private `fetchBlobObjectUrl` (`<img>` can't send a Bearer header, so raw bytes are fetched through the single authenticated API client and rendered as a blob object URL).
+- **`components/PhotoGrid.tsx`** — reusable, self-contained, paginated grid: fetches page 1 on mount, appends pages via a **"Load more"** button, renders a responsive `img` grid from object URLs (revoked on unmount), and shows a placeholder for not-yet-`processed` photos. Accepts an optional `refreshKey` prop — bumping it reloads page 1 (used to refresh after an upload). Empty / error / loading states included. Reusable for the Phase 5 matched-photo feed.
+- **`lib/api.ts`** — added `uploadEventPhoto(eventId, file)` (multipart `POST .../photos` via the shared `request` client) + `PhotoUploadResponse` type.
+- **`app/events/[id]/page.tsx`** — embeds `<PhotoGrid eventId={...} refreshKey={refreshKey} />` on the event preview page below the invite-link card, plus an **upload control** (file input + "Upload photo" button) that calls `uploadEventPhoto` and bumps `refreshKey` to refresh the grid. Uploading / error states shown inline.
+
+**Stop-condition verification** (rebuilt `app` container, `docker compose up -d --build app`):
+- ✅ Login as member → uploaded a face photo → `201` pending → worker processed it.
+- ✅ `GET .../photos?offset=0&limit=24` returned the photo with `status=processed`, correct relative `file_url`, `has_more=false`, `next_offset=1`.
+- ✅ `GET .../photos/{id}/file` returned `200 image/jpeg` with the exact image bytes (125,770).
+- ✅ Unauthenticated `GET .../photos` → `401`; non-member → `403` (with the "not a member" detail).
+- ✅ Frontend `eslint` + `npm run build` pass; `/events/[id]` is a dynamic server route.
+
 ## ✅ Phase 2 — Face Profile Enrollment ("get scanned")
 
 **Goal:** An authenticated user submits face image(s) → their permanent profile vector.

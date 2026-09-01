@@ -91,8 +91,29 @@ async function request<T>(
   return (await res.json()) as T;
 }
 
-// --- Domain types ----------------------------------------------------------
+/** Fetches an authenticated resource as a binary blob and returns an object URL
+ *  for it (used for `<img>` since an `<img>` tag can't send a Bearer header).
+ *  Caller is responsible for revoking the URL when the component unmounts. */
+async function fetchBlobObjectUrl(path: string): Promise<string> {
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE_URL}${path}`, { headers });
+  if (!res.ok) {
+    let detail = `${path} failed (${res.status})`;
+    try {
+      const data = await res.json();
+      if (typeof data?.detail === "string") detail = data.detail;
+    } catch {
+      // ignore unparseable bodies
+    }
+    throw new ApiError(res.status, detail);
+  }
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
 
+// --- Domain types ----------------------------------------------------------
 export interface UserResponse {
   email: string;
   display_name: string;
@@ -137,6 +158,27 @@ export interface EventDetailResponse extends EventResponse {
 export interface EventJoinResponse {
   event: EventResponse;
   joined: boolean;
+}
+
+export interface PhotoResponse {
+  id: string;
+  event_id: string;
+  status: string;
+  uploaded_at: string;
+  file_url: string;
+}
+
+export interface PhotoListResponse {
+  items: PhotoResponse[];
+  has_more: boolean;
+  next_offset: number;
+}
+
+export interface PhotoUploadResponse {
+  id: string;
+  event_id: string;
+  status: string;
+  uploaded_at: string;
 }
 
 export interface CreateEventInput {
@@ -234,5 +276,43 @@ export async function getEvent(eventId: string): Promise<EventDetailResponse> {
   return request<EventDetailResponse>(
     `/api/v1/events/${encodeURIComponent(eventId)}`,
     { authenticated: true },
+  );
+}
+
+// --- Photos ----------------------------------------------------------------
+
+/** Uploads a photo to an event (members only). */
+export async function uploadEventPhoto(
+  eventId: string,
+  file: File,
+): Promise<PhotoUploadResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  return request<PhotoUploadResponse>(
+    `/api/v1/events/${encodeURIComponent(eventId)}/photos`,
+    { method: "POST", body: form, authenticated: true },
+  );
+}
+
+/** Lists an event's photos, newest first, paginated (members only). */
+export async function getEventPhotos(
+  eventId: string,
+  offset = 0,
+  limit = 24,
+): Promise<PhotoListResponse> {
+  return request<PhotoListResponse>(
+    `/api/v1/events/${encodeURIComponent(eventId)}/photos?offset=${offset}&limit=${limit}`,
+    { authenticated: true },
+  );
+}
+
+/** Fetches a single event photo as an object URL for an `<img>` (members only).
+ *  The returned URL must be revoked when no longer shown. */
+export async function getEventPhotoObjectUrl(
+  eventId: string,
+  photoId: string,
+): Promise<string> {
+  return fetchBlobObjectUrl(
+    `/api/v1/events/${encodeURIComponent(eventId)}/photos/${encodeURIComponent(photoId)}/file`,
   );
 }

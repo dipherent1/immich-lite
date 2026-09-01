@@ -51,3 +51,13 @@ class FileService(ABC):
     @abstractmethod
     def ensure_directory(self, path: str) -> str:
         ...
+
+    @abstractmethod
+    def read(self, path: str) -> bytes:
+        """Return the raw bytes for a stored (relative) path."""
+
+    @abstractmethod
+    def abs_path(self, path: str) -> str:
+        """Resolve a stored (relative) path to a concrete filesystem path for the
+        worker/embedder to open directly. Kept separate from the relative path so
+        a future object-store backend can swap the resolution without changing callers."""

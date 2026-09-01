@@ -9,13 +9,16 @@ from sqlmodel import Session
 
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.core.file_storage import LocalFileService
 from app.core.security import decode_access_token
 from app.core.vector_db import QdrantProfileRepository
 from app.models.user import User
 from app.repositories.event_repository import EventRepository
+from app.repositories.photo_repository import PhotoRepository
 from app.repositories.user_repository import UserRepository
 from app.services.embedding_service import InsightFaceEmbeddingService
 from app.services.event_service import EventService
+from app.services.photo_service import PhotoService
 from app.services.profile_service import ProfileService
 from app.services.user_service import UserService
 
@@ -55,6 +58,22 @@ def get_profile_service(
 
 def get_event_repository(db: Session = Depends(get_db)) -> EventRepository:
     return EventRepository(db)
+
+
+def get_photo_repository(db: Session = Depends(get_db)) -> PhotoRepository:
+    return PhotoRepository(db)
+
+
+def get_file_service() -> LocalFileService:
+    return LocalFileService(root=get_settings().output_root)
+
+
+def get_photo_service(
+    events: EventRepository = Depends(get_event_repository),
+    photos: PhotoRepository = Depends(get_photo_repository),
+    files: LocalFileService = Depends(get_file_service),
+) -> PhotoService:
+    return PhotoService(events, photos, files)
 
 
 def get_event_service(

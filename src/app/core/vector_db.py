@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import uuid
 
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, PointStruct, VectorParams
@@ -73,6 +74,86 @@ class QdrantProfileRepository:
     def has_profile(self, user_id: str) -> bool:
         points = self._client.retrieve(collection_name=self._collection_name, ids=[user_id])
         return len(points) > 0
+
+
+class EventFaceRepository:
+    """Qdrant collection of per-face vectors from event photos.
+
+    One point per detected face in an uploaded photo. The point id is a fresh
+    UUID per face (a single photo can hold several faces), and every point's
+    payload carries the Postgres ids it belongs to (`event_id`, `photo_id`)
+    plus the face bounding box. Matching (Phase 5) filters on `event_id` then
+    searches for attendee vectors — it never scans the whole collection.
+    """
+
+    def __init__(
+        self,
+        url: str | None = None,
+        api_key: str | None = None,
+        collection_name: str = "event_faces",
+    ) -> None:
+        self._url = url or os.environ.get("QDRANT_URL", "http://localhost:8090")
+        self._api_key = api_key or os.environ.get("QDRANT_API_KEY") or None
+        self._collection_name = collection_name or os.environ.get("QDRANT_EVENT_FACES_COLLECTION", "event_faces")
+        self._client = QdrantClient(url=self._url, api_key=self._api_key)
+        self._ensure_collection()
+
+    def _ensure_collection(self) -> None:
+        collections = self._client.get_collections().collections
+        exists = any(c.name == self._collection_name for c in collections)
+        if not exists:
+            self._client.create_collection(
+                collection_name=self._collection_name,
+                vectors_config=VectorParams(size=VECTOR_DIM, distance=Distance.COSINE),
+            )
+            self._client.create_payload_index(
+                collection_name=self._collection_name,
+                field_name="event_id",
+                field_schema="keyword",
+            )
+            self._client.create_payload_index(
+                collection_name=self._collection_name,
+                field_name="photo_id",
+                field_schema="keyword",
+            )
+            logger.info("Created Qdrant collection: %s", self._collection_name)
+        else:
+            logger.debug("Qdrant event_faces collection already exists: %s", self._collection_name)
+
+    def upsert_faces(
+        self,
+        *,
+        event_id: str,
+        photo_id: str,
+        embeddings: list[FaceEmbedding],
+    ) -> int:
+        """Upsert one point per face. Returns the number of faces stored.
+
+        Each face gets a fresh UUID point id so one photo can contribute several
+        points without overwriting each other. The same photo only ever produces
+        a single set of points (Photo.status flips to `processed` after this).
+        """
+        points = [
+            PointStruct(
+                id=str(uuid.uuid4()),
+                vector=emb.embedding,
+                payload={
+                    "event_id": event_id,
+                    "photo_id": photo_id,
+                    "bbox_x1": emb.bbox.x1,
+                    "bbox_y1": emb.bbox.y1,
+                    "bbox_x2": emb.bbox.x2,
+                    "bbox_y2": emb.bbox.y2,
+                    "face_score": emb.face_score,
+                },
+            )
+            for emb in embeddings
+        ]
+        if not points:
+            return 0
+        self._client.upsert(collection_name=self._collection_name, points=points)
+        logger.info("Upserted %d face point(s) event=%s photo=%s", len(points), event_id, photo_id)
+        return len(points)
 
 
 class QdrantEmbeddingRepository(EmbeddingRepository):

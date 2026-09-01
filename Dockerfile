@@ -15,7 +15,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 ENV PYTHONPATH=/app/src
-RUN python -c "from app.services.embedding_service import _ensure_model_files; _ensure_model_files('buffalo_l')"
+# Best-effort pre-cache of the face models we use (buffalo_s). The worker and the
+# API share a runtime model-cache volume, so a cold build that can't reach
+# HuggingFace still succeeds and the models are fetched at first run instead.
+RUN python -c "from app.services.embedding_service import _ensure_model_files; _ensure_model_files('buffalo_s')" || true
 
 ENV QDRANT_URL=http://qdrant:6333
 
