@@ -204,7 +204,11 @@ Time window (simplest option from PHASES.md): an event is joinable when `starts_
 - `lib/api.ts` — new `PhotoResponse`/`PhotoListResponse` types, `getEventPhotos(eventId, offset, limit)` and `getEventPhotoObjectUrl(eventId, photoId)`. The object-URL helper uses the existing private `fetchBlobObjectUrl` (`<img>` can't send a Bearer header, so raw bytes are fetched through the single authenticated API client and rendered as a blob object URL).
 - **`components/PhotoGrid.tsx`** — reusable, self-contained, paginated grid: fetches page 1 on mount, appends pages via a **"Load more"** button, renders a responsive `img` grid from object URLs (revoked on unmount), and shows a placeholder for not-yet-`processed` photos. Accepts an optional `refreshKey` prop — bumping it reloads page 1 (used to refresh after an upload). Empty / error / loading states included. Reusable for the Phase 5 matched-photo feed.
 - **`lib/api.ts`** — added `uploadEventPhoto(eventId, file)` (multipart `POST .../photos` via the shared `request` client) + `PhotoUploadResponse` type.
-- **`app/events/[id]/page.tsx`** — embeds `<PhotoGrid eventId={...} refreshKey={refreshKey} />` on the event preview page below the invite-link card, plus an **upload control** (file input + "Upload photo" button) that calls `uploadEventPhoto` and bumps `refreshKey` to refresh the grid. Uploading / error states shown inline.
+- **`app/events/[id]/page.tsx`** — embeds `<PhotoGrid eventId={...} refreshKey={refreshKey} />` on the event preview page below the invite-link card. The **upload control** is a multi-file flow:
+  - `input type="file" multiple` **only queues** files (nothing uploads on selection) and builds **thumbnail previews** via `URL.createObjectURL` (per-file object URLs, revoked on remove/upload/unmount — a `previewUrlsRef` tracks them so the lint rule on refs-in-cleanup is satisfied).
+  - Each queued thumbnail has a **× button** to cancel that individual photo before anything is uploaded (`removeSelected` updates the batch + count and revokes that URL).
+  - An explicit **"Upload N photos"** button uploads the whole batch in parallel (`Promise.allSettled(map(uploadEventPhoto))`), clears the queue, bumps `refreshKey` to reload the grid, and shows a summary ("N photos uploaded" / "X of N uploaded; Y failed").
+  - Uploading / error states shown inline.
 
 **Stop-condition verification** (rebuilt `app` container, `docker compose up -d --build app`):
 - ✅ Login as member → uploaded a face photo → `201` pending → worker processed it.

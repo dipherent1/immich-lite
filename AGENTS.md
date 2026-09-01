@@ -5,6 +5,7 @@ This project has a knowledge graph at graphify-out/ with god nodes, community st
 When the user types `/graphify`, invoke the `skill` tool with `skill: "graphify"` before doing anything else.
 
 Rules:
+
 - For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
 - Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
 - If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
@@ -15,7 +16,7 @@ Rules:
 
 ### Directory structure
 
-Grow into this layout, keeping the existing `insightface`/ArcFace embedding code and Qdrant client — relocate them, don't rewrite them. This reflects the current live structure (Phase 0/1 + frontend).
+Grow into this layout, keeping the existing `insightface`/ArcFace embedding code and Qdrant client — relocate them, don't rewrite them. This reflects the current live structure (Phases 0–4 + frontend).
 
 ```text
 alembic.ini                         # Alembic config (root, alongside docker-compose.yml)
@@ -30,18 +31,20 @@ src/
 │   │   │   ├── endpoints/
 │   │   │   │   ├── auth.py         # register/login (thin)
 │   │   │   │   ├── users.py        # profile scan + re-scan
-│   │   │   │   ├── events.py       # create/join/list events
-│   │   │   │   ├── photos.py       # upload + retrieval
+│   │   │   │   ├── events.py       # create/join/list events + photo upload/list/file
+│   │   │   │   ├── photos.py       # upload + retrieval (planned home; currently in events.py)
 │   │   │   │   └── matches.py      # per-user matched-photo feed
 │   │   │   └── api.py              # aggregates routers
-│   │   └── deps.py                 # DI wiring: get_db, get_user_service/repo, get_current_user
+│   │   └── deps.py                 # DI wiring: get_db, get_user_*/photo_*/file deps, get_current_user
 │   ├── core/
 │   │   ├── config.py               # Pydantic BaseSettings (env vars) + load_dotenv
 │   │   ├── database.py             # relational DB session (Postgres)
 │   │   ├── security.py             # password hashing (pwdlib[bcrypt]), JWT (PyJWT)
 │   │   ├── logging.py              # setup_logging(): console + rotating file; log_exception helpers
 │   │   ├── middleware.py           # RequestLoggingMiddleware (method/path/status/duration/user)
-│   │   └── vector_db.py            # Qdrant client/session wrapper
+│   │   ├── vector_db.py            # Qdrant client/session wrapper + EventFaceRepository (event_faces)
+│   │   ├── file_storage.py         # FileService (ABC in domain/interfaces.py): LocalFileService
+│   │   └── jobs.py                 # RQ: enqueue_photo_processing(photo_id)
 │   ├── domain/                     # shared value types & interfaces (Phase 0): entities, interfaces
 │   ├── models/                     # SQLAlchemy/SQLModel ORM models
 │   │   ├── user.py
@@ -50,7 +53,8 @@ src/
 │   │   ├── photo.py
 │   │   └── photo_match.py
 │   ├── repositories/               # DB access layer (one class per aggregate)
-│   │   └── user_repository.py      # all `users` SQLAlchemy access
+│   │   ├── user_repository.py      # all `users` SQLAlchemy access
+│   │   └── photo_repository.py     # all `photos` access (paginated list_for_event)
 │   ├── schemas/                    # Pydantic request/response DTOs
 │   ├── services/                   # business logic, framework-agnostic
 │   │   ├── user_service.py         # register/authenticate/get_by_id (HTTPException on error)
@@ -58,6 +62,7 @@ src/
 │   │   ├── profile_service.py      # enroll/update a user's face vector
 │   │   ├── event_service.py        # event lifecycle, join logic
 │   │   ├── ingestion_service.py    # photo -> faces -> embeddings
+│   │   ├── photo_service.py        # upload rules + member-scoped photo list/file
 │   │   └── matching_service.py     # vector search scoped to attendees
 │   ├── workers/                    # background/async job entry points
 │   │   └── photo_worker.py         # embed + match a single uploaded photo
