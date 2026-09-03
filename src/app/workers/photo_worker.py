@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 
 from app.core.config import get_settings
 from app.core.database import SessionLocal
@@ -80,16 +81,35 @@ def main() -> None:
     setup_logging()
 
     from redis import Redis
+    from redis.exceptions import ConnectionError as RedisConnectionError
+    from redis.exceptions import TimeoutError as RedisTimeoutError
     from rq import Queue, Worker
 
     settings = get_settings()
     redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-    logger.info("photo worker starting, redis=%s", redis_url)
 
-    connection = Redis.from_url(redis_url)
-    queue = Queue("photos", connection=connection)
-    worker = Worker([queue], connection=connection)
-    worker.work(with_scheduler=False)
+    # The worker is long-lived but its Redis connection can hit a transient
+    # socket timeout; RQ's work() then quits and the process dies, leaving any
+    # queued photo job (and thus its matching) silently stalled. Keep the
+    # connection alive with keepalive + retry-on-timeout and, should it ever
+    # break anyway, reconnect and resume in a fresh loop instead of exiting.
+    while True:
+        try:
+            connection = Redis.from_url(
+                redis_url,
+                socket_keepalive=True,
+                socket_timeout=None,
+                socket_connect_timeout=10,
+                retry_on_timeout=True,
+            )
+            queue = Queue("photos", connection=connection)
+            worker = Worker([queue], connection=connection)
+            logger.info("photo worker starting (pid=%s) redis=%s", os.getpid(), redis_url)
+            worker.work(with_scheduler=False)
+            logger.warning("photo worker work() returned; reconnecting")
+        except (RedisConnectionError, RedisTimeoutError) as exc:
+            logger.warning("photo worker lost Redis connection (%s); reconnecting", exc)
+        time.sleep(3)
 
 
 if __name__ == "__main__":

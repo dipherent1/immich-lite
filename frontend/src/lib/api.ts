@@ -115,6 +115,7 @@ async function fetchBlobObjectUrl(path: string): Promise<string> {
 
 // --- Domain types ----------------------------------------------------------
 export interface UserResponse {
+  id: string;
   email: string;
   display_name: string;
   created_at: string;
@@ -314,5 +315,35 @@ export async function getEventPhotoObjectUrl(
 ): Promise<string> {
   return fetchBlobObjectUrl(
     `/api/v1/events/${encodeURIComponent(eventId)}/photos/${encodeURIComponent(photoId)}/file`,
+  );
+}
+
+// --- Matches ---------------------------------------------------------------
+
+export interface MatchFeedItemResponse {
+  photo_id: string;
+  event_id: string;
+  event_name: string;
+  similarity: number;
+  bbox: { x1: number; y1: number; x2: number; y2: number } | null;
+  file_url: string;
+  created_at: string;
+}
+
+export interface MatchFeedResponse {
+  items: MatchFeedItemResponse[];
+  has_more: boolean;
+  next_offset: number;
+}
+
+/** The current user's matched-photo feed (photos containing their face), newest
+ *  first, paginated. */
+export async function getMyMatches(
+  offset = 0,
+  limit = 24,
+): Promise<MatchFeedResponse> {
+  return request<MatchFeedResponse>(
+    `/api/v1/matches/me?offset=${offset}&limit=${limit}`,
+    { authenticated: true },
   );
 }

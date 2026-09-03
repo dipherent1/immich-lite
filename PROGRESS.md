@@ -255,6 +255,32 @@ Time window (simplest option from PHASES.md): an event is joinable when `starts_
 - **`Session.exec()` is unavailable on the injected session.** The feed join initially used SQLModel's `.exec()`, but the DI session is a plain SQLAlchemy `Session` (which has `.scalars()`/`.execute()` but not `.exec()`) → `AttributeError: 'Session' object has no attribute 'exec'` (500). Fixed `list_feed_for_user` to use `self._db.execute(statement)` and unpack `Row`s to `(match, event)` tuples — matching the `.scalars()`/`.execute()` style used elsewhere.
 - **`ingestion.process_by_id` return type** — it returned the face count (`int`); changed to return the `Photo` so the worker can pass it to `MatchingService.match_photo`.
 
+### Phase 5.5 — Frontend matched-photos page
+
+**Goal:** the matched-photo feed rendered in the UI.
+
+- **`lib/api.ts`** — `MatchFeedItemResponse`/`MatchFeedResponse` types + `getMyMatches(offset, limit)` (authenticated `GET /api/v1/matches/me`).
+- **`components/MatchesGrid.tsx`** — mirrors the event `PhotoGrid` pattern: fetches page 1 on mount, "Load more" pagination, blob object URLs (revoked on unmount). Each tile overlays the source **event name** + match **confidence %**. Photo bytes fetched via the existing `getEventPhotoObjectUrl(event_id, photo_id)` (auth attached through the single API client).
+- **`app/matches/page.tsx`** — `RequireAuth`-guarded route linking back to the dashboard.
+- **`app/dashboard/page.tsx`** — added a "View your matched photos →" link.
+- Verified `eslint` (only the pre-existing `RequireAuth` error + `FaceScan` `<img>` warning remain) and `npm run build` (exit 0, `/matches` route included).
+
+### Bug fix — worker Redis connection timeout killed matching (invisible bug)
+
+**Symptom:** user scans their face and uploads it to an event but it "doesn't match"; nothing new appears in `/matches/me`.
+
+**Diagnosis (dumped live Qdrant + workers):**
+- `user_profiles` and `event_faces` vectors were **correct** — the user's profile (user `6080862f-…`) and their uploaded event face had *identical* vectors.
+- Driving the exact matching path (`list_attendee_ids` → `query_similar_restricted`) returned `0.99999994` — the **backend matching logic was not broken**.
+- Worker logs showed the real defect: recurring `[ERROR] rq.worker: Worker …: Redis connection timeout, quitting...` every ~6.5 min. RQ 2.12's `worker.work()` **exits when the long-idle Redis connection times out**, killing the whole process. While the worker was down, newly-uploaded photos sat unprocessed, so they were never matched.
+- The worker container kept auto-restarting (`restart: unless-stopped`), which masked it as a random crash instead of a code bug.
+
+**Fix (`src/app/workers/photo_worker.py` `main()`):**
+- Build the Redis connection with `socket_keepalive=True`, `socket_timeout=None`, `socket_connect_timeout=10`, `retry_on_timeout=True`.
+- Wrap `worker.work()` in an outer `while True` loop that logs and reconnects after 3s on any `RedisConnectionError`/`RedisTimeoutError` (or when `work()` returns), so a transient timeout can **never** permanently kill the worker.
+
+**Verified end-to-end:** rebuilt the worker, `/matches/me` returned the first entry as the user's brand-new upload (photo `acc1c43e`…) at the top with `similarity 0.99999994`.
+
 ## ✅ Phase 2 — Face Profile Enrollment ("get scanned")
 
 **Goal:** An authenticated user submits face image(s) → their permanent profile vector.

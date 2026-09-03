@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -40,6 +41,21 @@ function DashboardContent() {
       )}
       <FaceScan />
       <EventsView />
+      <div style={{ marginTop: 24 }}>
+        <Link
+          href="/matches"
+          style={{
+            display: "inline-block",
+            padding: "8px 14px",
+            border: "1px solid #e2e2e2",
+            borderRadius: 6,
+            textDecoration: "none",
+            color: "inherit",
+          }}
+        >
+          View your matched photos →
+        </Link>
+      </div>
       <div style={{ marginTop: 24 }}>
         <button onClick={handleLogout}>Log out</button>
       </div>
