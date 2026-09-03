@@ -63,9 +63,10 @@ class IngestionService:
             self._repo.set_status(photo.id, "failed")
             raise
 
-    def process_by_id(self, photo_id: str) -> int:
+    def process_by_id(self, photo_id: str) -> Photo:
         photo = self._repo.get_by_id(photo_id)
         if photo is None:
             logger.warning("photo not found for processing: %s", photo_id)
             raise FileNotFoundError(f"Photo {photo_id} not found")
-        return self.process(photo)
+        self.process(photo)
+        return photo

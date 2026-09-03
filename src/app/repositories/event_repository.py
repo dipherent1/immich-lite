@@ -62,6 +62,15 @@ class EventRepository:
             select(func.count()).select_from(EventAttendee).where(EventAttendee.event_id == event_id)
         ) or 0
 
+    def list_attendee_ids(self, event_id: str) -> list[str]:
+        """All attendee user ids for an event (used to scope matching, Phase 5)."""
+        rows = list(
+            self._db.scalars(
+                select(EventAttendee.user_id).where(EventAttendee.event_id == event_id)
+            )
+        )
+        return list(dict.fromkeys(rows))
+
     def search_by_name(self, name: str) -> list[Event]:
         """Partial, case-insensitive name match, newest first."""
         return list(

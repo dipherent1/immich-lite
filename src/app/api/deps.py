@@ -11,13 +11,15 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.file_storage import LocalFileService
 from app.core.security import decode_access_token
-from app.core.vector_db import QdrantProfileRepository
+from app.core.vector_db import EventFaceRepository, QdrantProfileRepository
 from app.models.user import User
 from app.repositories.event_repository import EventRepository
+from app.repositories.photo_match_repository import PhotoMatchRepository
 from app.repositories.photo_repository import PhotoRepository
 from app.repositories.user_repository import UserRepository
 from app.services.embedding_service import InsightFaceEmbeddingService
 from app.services.event_service import EventService
+from app.services.matching_service import MatchingService
 from app.services.photo_service import PhotoService
 from app.services.profile_service import ProfileService
 from app.services.user_service import UserService
@@ -74,6 +76,29 @@ def get_photo_service(
     files: LocalFileService = Depends(get_file_service),
 ) -> PhotoService:
     return PhotoService(events, photos, files)
+
+
+def get_event_face_repository() -> EventFaceRepository:
+    return EventFaceRepository(url=get_settings().qdrant_url)
+
+
+def get_photo_match_repository(db: Session = Depends(get_db)) -> PhotoMatchRepository:
+    return PhotoMatchRepository(db)
+
+
+def get_matching_service(
+    events: EventRepository = Depends(get_event_repository),
+    faces: EventFaceRepository = Depends(get_event_face_repository),
+    profiles: QdrantProfileRepository = Depends(get_profile_repository),
+    matches: PhotoMatchRepository = Depends(get_photo_match_repository),
+) -> MatchingService:
+    return MatchingService(
+        events,
+        faces,
+        profiles,
+        matches,
+        similarity_threshold=get_settings().similarity_threshold,
+    )
 
 
 def get_event_service(

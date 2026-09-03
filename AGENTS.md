@@ -16,7 +16,7 @@ Rules:
 
 ### Directory structure
 
-Grow into this layout, keeping the existing `insightface`/ArcFace embedding code and Qdrant client — relocate them, don't rewrite them. This reflects the current live structure (Phases 0–4 + frontend).
+Grow into this layout, keeping the existing `insightface`/ArcFace embedding code and Qdrant client — relocate them, don't rewrite them. This reflects the current live structure (Phases 0–5 + frontend).
 
 ```text
 alembic.ini                         # Alembic config (root, alongside docker-compose.yml)
@@ -42,7 +42,7 @@ src/
 │   │   ├── security.py             # password hashing (pwdlib[bcrypt]), JWT (PyJWT)
 │   │   ├── logging.py              # setup_logging(): console + rotating file; log_exception helpers
 │   │   ├── middleware.py           # RequestLoggingMiddleware (method/path/status/duration/user)
-│   │   ├── vector_db.py            # Qdrant client/session wrapper + EventFaceRepository (event_faces)
+│   │   ├── vector_db.py            # Qdrant client/session wrapper + QdrantProfileRepository (user_profiles) + EventFaceRepository (event_faces)
 │   │   ├── file_storage.py         # FileService (ABC in domain/interfaces.py): LocalFileService
 │   │   └── jobs.py                 # RQ: enqueue_photo_processing(photo_id)
 │   ├── domain/                     # shared value types & interfaces (Phase 0): entities, interfaces
@@ -54,8 +54,10 @@ src/
 │   │   └── photo_match.py
 │   ├── repositories/               # DB access layer (one class per aggregate)
 │   │   ├── user_repository.py      # all `users` SQLAlchemy access
-│   │   └── photo_repository.py     # all `photos` access (paginated list_for_event)
-│   ├── schemas/                    # Pydantic request/response DTOs
+│   │   ├── event_repository.py     # all `events` + `event_attendees` access (list_attendee_ids)
+│   │   ├── photo_repository.py     # all `photos` access (paginated list_for_event)
+│   │   └── photo_match_repository.py # `photo_matches` access (upsert_best, feed list)
+│   ├── schemas/                    # Pydantic request/response DTOs (incl. match.py feed)
 │   ├── services/                   # business logic, framework-agnostic
 │   │   ├── user_service.py         # register/authenticate/get_by_id (HTTPException on error)
 │   │   ├── embedding_service.py    # wraps existing InsightFace code

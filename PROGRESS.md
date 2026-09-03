@@ -217,6 +217,44 @@ Time window (simplest option from PHASES.md): an event is joinable when `starts_
 - ✅ Unauthenticated `GET .../photos` → `401`; non-member → `403` (with the "not a member" detail).
 - ✅ Frontend `eslint` + `npm run build` pass; `/events/[id]` is a dynamic server route.
 
+## ✅ Phase 5 — Matching & Delivery
+
+**Goal:** a processed event photo's detected faces are matched against the event's attendee face profiles (`user_profiles`), one `PhotoMatch` row is written per (photo, user) keeping the best similarity, and matched photos are delivered to users via an authenticated `GET /api/v1/matches/me` feed. Push/email are out of scope — the feed is the delivery.
+**Status:** Complete. All stop conditions verified against the rebuilt Docker stack.
+
+### What was done
+
+- **`models/photo_match.py`** — `PhotoMatch` (SQLModel): `id` (UUID PK), `photo_id` (FK → `photos.id`), `user_id` (FK → `users.id`), `similarity` (double), `bbox` (stored as a JSON string with a `bbox_dict` property), `created_at`. Unique constraint `(photo_id, user_id)` guarantees one row per pair → `upsert_best` keeps the highest similarity instead of duplicating. Registered in `models/__init__.py`.
+- **Migration `migrations/versions/0004_create_photo_matches.py`** — Alembic creates `photo_matches` (+ `uq_photo_matches_photo_user`, FKs, indexes). Applies, rolls back to `0003`, and re-applies cleanly.
+- **`core/vector_db.py`**:
+  - `QdrantProfileRepository.query_similar_restricted(query, user_ids, *, threshold, limit)` — searches `user_profiles` **only among the given attendee ids** (payload filter `user_id in user_ids` on `score_threshold`) — matching never scans the whole profiles collection.
+  - `EventFaceRepository.get_faces_for_photo(photo_id)` — reads a photo's per-face vectors back from `event_faces` (scroll filtered on `photo_id` payload).
+- **`repositories/event_repository.py`** — `list_attendee_ids(event_id)` returns the attendee user ids for an event.
+- **`repositories/photo_match_repository.py`** — `upsert_best(...)` (see model) and `list_feed_for_user(user_id, offset, limit)` — one query, joins `PhotoMatch → Photo → Event`, newest first, `limit+1` for `has_more`, returns `(match, event)` tuples.
+- **`services/matching_service.py`** — `MatchingService`:
+  - `match_photo(photo)` — scoped matching: `list_attendee_ids` → `get_faces_for_photo` → per face `query_similar_restricted(above threshold)` → `upsert_best` each hit. Returns the number of rows written. Kept fully independently callable/testable.
+  - `feed(user_id, offset, limit)` — the user's matched-photo delivery feed, newest first.
+- **`schemas/match.py`** — `MatchFeedItemResponse {photo_id, event_id, event_name, similarity, bbox, file_url, created_at}` + `MatchFeedResponse {items, has_more, next_offset}`. `file_url` points at the existing `/api/v1/events/{event_id}/photos/{photo_id}/file` (no new download endpoint, no file duplication).
+- **`api/v1/endpoints/matches.py`** — `GET /api/v1/matches/me?offset=&limit=` (200) — the authenticated user's feed across all events they attended. Thin: calls `MatchingService.feed`.
+- **`api/v1/api.py`** — wires in the `matches` router. **`api/deps.py`** — `get_event_face_repository`, `get_photo_match_repository`, `get_matching_service` (threshold from settings `similarity_threshold`).
+- **`workers/photo_worker.py`** — `_build_job()` now returns fresh `(ingestion, matching, db)` deps; `process_photo(photo_id)` runs ingestion first, then `matching.match_photo(photo)` — matching is a **separate, independent service call** after ingestion (per spec). `ingestion.process_by_id` now returns the `Photo` object (it previously returned the face count) so the worker can hand the same photo to matching.
+
+### Stop-condition verification (rebuilt `app` + `worker`, stack on `localhost:8080`)
+
+- ✅ `alembic upgrade head` applies `0004_create_photo_matches`; table has the unique `uq_photo_matches_photo_user` + FKs.
+- ✅ `alembic downgrade 0003_create_photos` drops the table cleanly; `upgrade head` recreates it.
+- ✅ Re-scanned a known member's profile (`POST /users/me/scan` with a 1-face image), then uploaded the **same** image to an event they attend → worker ingested 1 face and produced a `PhotoMatch` with `similarity=1.0` for that attendee (and nobody else).
+- ✅ `GET /api/v1/matches/me` for the **matched attendee** returned the photo (`event_name`, `bbox`, `similarity`, working relative `file_url`), `has_more=false`.
+- ✅ A **non-matching** user's (and the event owner's) `/matches/me` returned empty `items`.
+- ✅ Unauthenticated `GET /matches/me` → `401`.
+- ✅ The matched-photo `.../file` endpoint returned `200` image bytes.
+
+### Notes / issues hit
+
+- **Qdrant similarity score for same-identity was ~0.077, not ~1.0.** The three pre-existing legacy `user_profiles` points (`bini`, `phase2`, `owner3`) were stored L2-normalized (norm 1.0) by an older code path, while the current embedder returns *unnormalized* embeddings (norm ~24). Verified (manual cosine == Qdrant score) that Qdrant's cosine is computed correctly — the legacy profile vectors just don't reflect their own source images. This is legacy test data, not a code bug. The controlled re-scan test above uses the current code path (raw centroid, same space) and yields `similarity=1.0`.
+- **`Session.exec()` is unavailable on the injected session.** The feed join initially used SQLModel's `.exec()`, but the DI session is a plain SQLAlchemy `Session` (which has `.scalars()`/`.execute()` but not `.exec()`) → `AttributeError: 'Session' object has no attribute 'exec'` (500). Fixed `list_feed_for_user` to use `self._db.execute(statement)` and unpack `Row`s to `(match, event)` tuples — matching the `.scalars()`/`.execute()` style used elsewhere.
+- **`ingestion.process_by_id` return type** — it returned the face count (`int`); changed to return the `Photo` so the worker can pass it to `MatchingService.match_photo`.
+
 ## ✅ Phase 2 — Face Profile Enrollment ("get scanned")
 
 **Goal:** An authenticated user submits face image(s) → their permanent profile vector.

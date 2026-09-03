@@ -6,7 +6,15 @@ import os
 import uuid
 
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import Distance, PointStruct, VectorParams
+from qdrant_client.http.models import (
+    Distance,
+    FieldCondition,
+    Filter,
+    MatchAny,
+    MatchValue,
+    PointStruct,
+    VectorParams,
+)
 
 from app.domain.entities import BoundingBox, FaceEmbedding, MatchResult
 from app.domain.interfaces import EmbeddingRepository
@@ -74,6 +82,48 @@ class QdrantProfileRepository:
     def has_profile(self, user_id: str) -> bool:
         points = self._client.retrieve(collection_name=self._collection_name, ids=[user_id])
         return len(points) > 0
+
+    def query_similar_restricted(
+        self,
+        query: list[float],
+        user_ids: list[str],
+        *,
+        threshold: float,
+        limit: int = 10,
+    ) -> list[tuple[str, float]]:
+        """Search profiles but only among `user_ids`.
+
+        Matching (Phase 5) must never scan the whole `user_profiles` collection —
+        it restricts the search to the current event's attendees first, then does
+        the similarity search. Returns `(user_id, similarity)` for hits above
+        `threshold`.
+        """
+        if not user_ids:
+            return []
+        query_filter = Filter(
+            must=[FieldCondition(key="user_id", match=MatchAny(any=user_ids))]
+        )
+        response = self._client.query_points(
+            collection_name=self._collection_name,
+            query=query,
+            query_filter=query_filter,
+            limit=limit,
+            score_threshold=threshold,
+            with_payload=True,
+            with_vectors=False,
+        )
+        results = [
+            (str(point.payload.get("user_id", "")), point.score)
+            for point in response.points
+            if point.payload and point.payload.get("user_id")
+        ]
+        logger.debug(
+            "restricted profile search among %d ids found %d above %.2f",
+            len(user_ids),
+            len(results),
+            threshold,
+        )
+        return results
 
 
 class EventFaceRepository:
@@ -154,6 +204,47 @@ class EventFaceRepository:
         self._client.upsert(collection_name=self._collection_name, points=points)
         logger.info("Upserted %d face point(s) event=%s photo=%s", len(points), event_id, photo_id)
         return len(points)
+
+    def get_faces_for_photo(self, photo_id: str) -> list[FaceEmbedding]:
+        """Return every face vector (with bbox) stored for a single photo.
+
+        Used by matching (Phase 5): after ingestion upserts a photo's faces here,
+        matching reads them back and, for each face vector, searches `user_profiles`
+        restricted to the event's attendees.
+        """
+        query_filter = Filter(
+            must=[FieldCondition(key="photo_id", match=MatchValue(value=photo_id))]
+        )
+        faces: list[FaceEmbedding] = []
+        offset = None
+        while True:
+            page, offset = self._client.scroll(
+                collection_name=self._collection_name,
+                scroll_filter=query_filter,
+                limit=1000,
+                offset=offset,
+                with_payload=True,
+                with_vectors=True,
+            )
+            for point in page:
+                p = point.payload or {}
+                faces.append(
+                    FaceEmbedding(
+                        image_path="",
+                        embedding=list(point.vector or []),
+                        bbox=BoundingBox(
+                            x1=int(p.get("bbox_x1", 0)),
+                            y1=int(p.get("bbox_y1", 0)),
+                            x2=int(p.get("bbox_x2", 0)),
+                            y2=int(p.get("bbox_y2", 0)),
+                        ),
+                        face_score=float(p.get("face_score", 0.0)),
+                    )
+                )
+            if offset is None:
+                break
+        logger.debug("loaded %d face(s) for photo=%s", len(faces), photo_id)
+        return faces
 
 
 class QdrantEmbeddingRepository(EmbeddingRepository):

@@ -6,21 +6,25 @@ import os
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.core.file_storage import LocalFileService
-from app.core.vector_db import EventFaceRepository
+from app.core.vector_db import EventFaceRepository, QdrantProfileRepository
 from app.domain.interfaces import EmbeddingProvider
+from app.repositories.event_repository import EventRepository
+from app.repositories.photo_match_repository import PhotoMatchRepository
 from app.repositories.photo_repository import PhotoRepository
 from app.services.embedding_service import InsightFaceEmbeddingService
 from app.services.ingestion_service import IngestionService
+from app.services.matching_service import MatchingService
 
 logger = logging.getLogger(__name__)
 
 
-def _build_ingestion() -> tuple[IngestionService, SessionLocal]:
-    """Construct an IngestionService with fresh deps for a single job, returning
+def _build_job() -> tuple[IngestionService, MatchingService, SessionLocal]:
+    """Construct fresh ingestion + matching services for a single job, returning
     the owning session so the caller can close it when the job finishes.
 
-    Each job opens its own DB session and its own lazily-loaded embedder so a
-    worker restart or an individual failure never leaks state across photos.
+    Each job opens its own DB session, its own lazily-loaded embedder, and its
+    own Qdrant handles so a worker restart or an individual failure never leaks
+    state across photos.
     """
     settings = get_settings()
     embedder: EmbeddingProvider = InsightFaceEmbeddingService(
@@ -28,23 +32,42 @@ def _build_ingestion() -> tuple[IngestionService, SessionLocal]:
         detection_threshold=settings.detection_threshold,
     )
     db = SessionLocal()
-    repo = PhotoRepository(db)
+    photo_repo = PhotoRepository(db)
+    event_repo = EventRepository(db)
+    match_repo = PhotoMatchRepository(db)
     faces = EventFaceRepository(url=settings.qdrant_url)
+    profiles = QdrantProfileRepository(url=settings.qdrant_url)
     files = LocalFileService(root=settings.output_root)
-    return IngestionService(embedder, repo, faces, files), db
+
+    ingestion = IngestionService(embedder, photo_repo, faces, files)
+    matching = MatchingService(
+        event_repo,
+        faces,
+        profiles,
+        match_repo,
+        similarity_threshold=settings.similarity_threshold,
+    )
+    return ingestion, matching, db
 
 
 def process_photo(photo_id: str) -> int:
-    """RQ job: process a single uploaded photo (detect + embed + store faces).
+    """RQ job: process a single uploaded photo, then match it to attendees.
 
-    NOTE: this synchronous ingestion is the seam where a heavier async pipeline
-    would slot in. For volume growth the `embedding_service` call stays
-    thread/process-offloaded and this worker can be scaled out independently of
-    the API container.
+    1. Ingestion — detect + embed every face and store them in `event_faces`.
+    2. Matching  — for each stored face, search attendees' `user_profiles`
+       (restricted to the event's attendees) and write PhotoMatch rows.
+
+    Ingestion failure marks the photo `failed` and aborts matching. NOTE: this
+    synchronous pipeline is the seam where a heavier async pipeline would slot
+    in — for volume growth the embedding call stays thread/process-offloaded
+    and this worker can be scaled independently of the API container.
     """
-    service, db = _build_ingestion()
+    ingestion, matching, db = _build_job()
     try:
-        return service.process_by_id(photo_id)
+        photo = ingestion.process_by_id(photo_id)
+        # Matching is a separate, independently testable service call that runs
+        # automatically after embedding is stored (Phase 5).
+        return matching.match_photo(photo)
     finally:
         db.close()
 
