@@ -281,6 +281,30 @@ Time window (simplest option from PHASES.md): an event is joinable when `starts_
 
 **Verified end-to-end:** rebuilt the worker, `/matches/me` returned the first entry as the user's brand-new upload (photo `acc1c43e`…) at the top with `similarity 0.99999994`.
 
+## 🔍 Observability — structured logs + correlation ids + RQ dashboard
+
+**Goal:** stop debugging "blind." Logs are now JSON (machine-parseable for a future Loki/ELK/CloudWatch sink), carry correlation ids so a single upload can be traced API → queue → worker, and the queue/worker state is visible in a web UI — not hidden in `docker logs`.
+
+### What was done
+
+- **`core/logging.py`** — logs go to the rotating file as **one JSON object per line** (`{"ts","level","logger","message",...}`) via a new `JsonFormatter` (the console keeps a human formatter for local dev). Added a `contextvars`-based **correlation context** (`request_id`, `job_id`, `user_id`) — helpers `set_correlation()`, `correlation_context()`, `clear_correlation()` — plus `extra={"extra_fields": {...}}` support so call sites can attach structured key/value fields (photo_id, job_id, status, latency, …) that are merged into each record. `formatTime` now emits ISO-8601 with tz offset (`%z`).
+- **`core/middleware.py`** — each HTTP request gets a generated `request_id` (12 hex), stamped into the correlation context so every log line in that request (deps, services, errors) shares it; the authenticated user id is added to the context when present; request records carry structured fields (`method`, `path`, `status`, `duration_ms`, `request_id`) instead of one free-form string.
+- **`core/jobs.py`** — `enqueue_photo_processing` now logs the RQ `job.id` so the API side and the worker side of the same upload can be linked via `photo_id` + `job_id`.
+- **`workers/photo_worker.py`** — `process_photo` reads the current RQ job via `get_current_job()` and sets `job_id` into the correlation context, so every ingest/match log for that job carries the job id; logs `photo_id`/`event_id` as structured fields; clears the context when the job finishes.
+- **`docker-compose.yml`** — added `rq-dashboard` service (`eoranged/rq-dashboard`, `http://localhost:9181`) wired to the shared `redis:6379/0`. A live web UI showing the `photos` queue, queued/started/failed counts, and per-job status — exactly the surface that would have surfaced the earlier "worker died / jobs stuck" bug instantly.
+
+### Verified
+
+- ✅ `logs/app.log` (container `/app/logs/app.log`) entries are now JSON, e.g. `{"ts":"…+0000","level":"WARNING","logger":"app.request","message":"GET /api/nonexistent -> 404 (1.1ms)","request_id":"409f3c05c6e4","method":"GET","path":"/api/nonexistent","status":404,"duration_ms":1.1}`.
+- ✅ `JsonFormatter` emits correlation fields (`request_id`, `user_id`) and structured extras (`matches`) as JSON keys.
+- ✅ `rq-dashboard` up and responding on `http://localhost:9181` (HTTP 200).
+- ✅ `app` + `worker` rebuilt and running; worker listening on the `photos` queue with the new correlation code.
+
+### Notes / next steps (not done yet)
+
+- Prometheus + `/metrics` (queue depth, worker-alive, latency), Grafana dashboards, and alert rules are the remaining "real prod" layer — deliberately deferred (see the taught three-pillar model: logs → metrics → traces). The JSON logs are shaped so a Loki/ELK/CloudWatch agent can ingest them with zero reformatting.
+- The pre-existing double-log of unhandled 500s (request middleware logs with traceback, then the global `exception_handler` logs again) is retained for backward compatibility.
+
 ## ✅ Phase 2 — Face Profile Enrollment ("get scanned")
 
 **Goal:** An authenticated user submits face image(s) → their permanent profile vector.

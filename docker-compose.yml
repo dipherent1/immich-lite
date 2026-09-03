@@ -32,6 +32,18 @@ services:
     container_name: immich-lite-redis
     restart: unless-stopped
 
+  rq-dashboard:
+    image: eoranged/rq-dashboard
+    container_name: immich-lite-rq-dashboard
+    ports:
+      - "9181:9181"
+    environment:
+      - RQ_DASHBOARD_REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
   app:
     build: .
     container_name: immich-lite-app

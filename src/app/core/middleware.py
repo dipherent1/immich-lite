@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 
 from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from app.core.logging import clear_correlation, set_correlation
 
 logger = logging.getLogger("app.request")
 
@@ -26,6 +29,10 @@ class RequestLoggingMiddleware:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+
+        request_id = uuid.uuid4().hex[:12]
+        set_correlation(request_id=request_id)
+        scope["request_id"] = request_id
 
         start = time.perf_counter()
         request = Request(scope)
@@ -47,6 +54,7 @@ class RequestLoggingMiddleware:
                 request.url.path,
                 duration_ms,
                 exc_info=True,
+                extra={"extra_fields": {"method": request.method, "path": request.url.path}},
             )
             raise
         finally:
@@ -54,35 +62,27 @@ class RequestLoggingMiddleware:
             status = scope.get("_status_code", 500)
 
             if request.url.path in _WELL_KNOWN:
+                clear_correlation()
                 return
 
             user = getattr(request.state, "user_id", None)
-            user_part = f" user={user}" if user else ""
+            if user:
+                set_correlation(user_id=user)
+
+            fields = {
+                "method": request.method,
+                "path": request.url.path,
+                "status": status,
+                "duration_ms": round(duration_ms, 1),
+                "request_id": request_id,
+            }
+            msg = "%s %s -> %d (%.1fms)" % (request.method, request.url.path, status, duration_ms)
 
             if status >= 500:
-                logger.error(
-                    "HTTP %s %s -> %d (%.1fms)%s",
-                    request.method,
-                    request.url.path,
-                    status,
-                    duration_ms,
-                    user_part,
-                )
+                logger.error(msg, extra={"extra_fields": fields})
             elif status >= 400:
-                logger.warning(
-                    "HTTP %s %s -> %d (%.1fms)%s",
-                    request.method,
-                    request.url.path,
-                    status,
-                    duration_ms,
-                    user_part,
-                )
+                logger.warning(msg, extra={"extra_fields": fields})
             else:
-                logger.info(
-                    "HTTP %s %s -> %d (%.1fms)%s",
-                    request.method,
-                    request.url.path,
-                    status,
-                    duration_ms,
-                    user_part,
-                )
+                logger.info(msg, extra={"extra_fields": fields})
+
+            clear_correlation()

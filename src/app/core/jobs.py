@@ -23,8 +23,13 @@ def enqueue_photo_processing(photo_id: str) -> None:
 
         connection = Redis.from_url(get_settings().redis_url)
         queue = Queue("photos", connection=connection)
-        queue.enqueue("app.workers.photo_worker.process_photo", photo_id, job_timeout=300)
-        logger.info("enqueued photo job photo=%s", photo_id)
+        job = queue.enqueue(
+            "app.workers.photo_worker.process_photo", photo_id, job_timeout=300
+        )
+        logger.info(
+            "enqueued photo job",
+            extra={"extra_fields": {"photo_id": photo_id, "job_id": job.id}},
+        )
     except Exception:
         logger.exception("failed to enqueue photo job photo=%s", photo_id)
         raise

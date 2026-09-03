@@ -63,14 +63,26 @@ def process_photo(photo_id: str) -> int:
     in — for volume growth the embedding call stays thread/process-offloaded
     and this worker can be scaled independently of the API container.
     """
+    from rq import get_current_job
+
+    from app.core.logging import clear_correlation, set_correlation
+
+    job = get_current_job()
+    if job is not None:
+        set_correlation(job_id=job.id)
     ingestion, matching, db = _build_job()
     try:
         photo = ingestion.process_by_id(photo_id)
+        logger.info(
+            "processing photo",
+            extra={"extra_fields": {"photo_id": photo_id, "event_id": photo.event_id}},
+        )
         # Matching is a separate, independently testable service call that runs
         # automatically after embedding is stored (Phase 5).
         return matching.match_photo(photo)
     finally:
         db.close()
+        clear_correlation()
 
 
 def main() -> None:
