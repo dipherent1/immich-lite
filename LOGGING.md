@@ -193,6 +193,23 @@ docker compose logs worker
 docker exec immich-lite-app tail -f /app/logs/app.log
 ```
 
+### Where to look — one place for each service
+
+| What | URL |
+|---|---|
+| **Grafana dashboard** (all services at a glance) | http://localhost:3001 → "Immich Lite" (login `admin`/`admin`) |
+| **Prometheus** (query/metrics + alert rules) | http://localhost:9090 |
+| **Alertmanager** (alerts + notifications) | http://localhost:9093 |
+| **RQ Dashboard** (photo queue + job status) | http://localhost:9181 |
+| **Qdrant** (collections, points, vectors) | http://localhost:8090/dashboard |
+| **Postgres** | pgAdmin (your existing setup) |
+| **App API** (FastAPI auto-docs) | http://localhost:8080/docs |
+| **App metrics** (raw Prometheus format) | http://localhost:8080/metrics |
+| **Redis / Postgres exporter endpoints** | http://localhost:9121/metrics / http://localhost:9187/metrics |
+
+> The **worker** metrics (`:9100`) are internal only — Prometheus reaches them
+> at `worker:9100` on the docker network, not exposed to the host.
+
 ### GitHub `grep`-style filtering (works because each line is one JSON object)
 
 ```bash
