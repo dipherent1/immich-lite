@@ -1,0 +1,58 @@
+groups:
+  - name: immich
+    rules:
+      - alert: WorkerDown
+        expr: up{job="immich-worker"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Face embedding worker is down"
+          description: "The RQ photo worker ({{ $labels.instance }}) has been unscrapable for 1m. New uploads are not being matched."
+
+      - alert: QueueGrowingStalled
+        expr: |
+          rq_queue_depth{queue="photos"} > 5 and changes(rq_queue_depth{queue="photos"}[15m]) == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Photo queue is backed up"
+          description: "The photos queue has {{ $value }} jobs and has not drained in 5m. Worker may be stuck."
+
+      - alert: Http5xxRate
+        expr: |
+          sum(rate(http_requests_total{status="5xx"}[5m])) by (job) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated 5xx rate"
+          description: "Job {{ $labels.job }} 5xx rate is {{ $value }} req/s over 5m."
+
+      - alert: QdrantDown
+        expr: up{job="qdrant"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Qdrant is down"
+          description: "Qdrant vector store ({{ $labels.instance }}) has been unscrapable for 1m."
+
+      - alert: PostgresDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Postgres exporter is down"
+          description: "Postgres is not reachable for metrics."
+
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis exporter is down"
+          description: "Redis is not reachable for metrics."

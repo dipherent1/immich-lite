@@ -9,11 +9,12 @@ if str(_SRC) not in sys.path:
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from app.api.v1.api import api_router
 from app.core.config import get_settings
 from app.core.logging import setup_logging
+from app.core.metrics import refresh_rq_metrics
 from app.core.middleware import RequestLoggingMiddleware
 
 logger = setup_logging()
@@ -56,3 +57,17 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 @app.get("/ping")
 async def ping() -> dict[str, str]:
     return {"message": "pong"}
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics() -> Response:
+    """Prometheus scrape endpoint: refresh live RQ queue depth, then return all
+    metrics in text exposition format. Deliberately unauthenticated so Prometheus
+    can scrape it; it exposes no user data."""
+    refresh_rq_metrics(get_settings().redis_url)
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+    return Response(
+        content=generate_latest(),
+        media_type=CONTENT_TYPE_LATEST,
+    )

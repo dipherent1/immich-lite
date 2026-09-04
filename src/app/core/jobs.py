@@ -4,6 +4,7 @@ import logging
 import os
 
 from app.core.config import get_settings
+from app.core.metrics import record_enqueue
 
 logger = logging.getLogger("app.jobs")
 
@@ -26,6 +27,7 @@ def enqueue_photo_processing(photo_id: str) -> None:
         job = queue.enqueue(
             "app.workers.photo_worker.process_photo", photo_id, job_timeout=300
         )
+        record_enqueue("photos")
         logger.info(
             "enqueued photo job",
             extra={"extra_fields": {"photo_id": photo_id, "job_id": job.id}},

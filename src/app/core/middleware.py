@@ -15,10 +15,11 @@ from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.logging import clear_correlation, set_correlation
+from app.core.metrics import observe_http
 
 logger = logging.getLogger("app.request")
 
-_WELL_KNOWN = {"/ping", "/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect"}
+_WELL_KNOWN = {"/ping", "/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect", "/metrics"}
 
 
 class RequestLoggingMiddleware:
@@ -59,7 +60,12 @@ class RequestLoggingMiddleware:
             raise
         finally:
             duration_ms = (time.perf_counter() - start) * 1000
+            duration_s = duration_ms / 1000.0
             status = scope.get("_status_code", 500)
+
+            # Emit Prometheus metrics (skip well-known endpoints like docs/ping/metrics).
+            route = getattr(scope.get("route"), "path", None) or request.url.path
+            observe_http(request.method, route, status, duration_s)
 
             if request.url.path in _WELL_KNOWN:
                 clear_correlation()

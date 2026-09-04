@@ -100,6 +100,13 @@ def main() -> None:
     settings = get_settings()
     redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
+    # Expose a /metrics endpoint so Prometheus can alert the moment the worker
+    # process dies (up{job="worker"} == 0). Served from the parent process that
+    # lives for the whole worker lifecycle.
+    from app.core.worker_metrics import start_metrics_server
+
+    start_metrics_server(port=int(os.environ.get("WORKER_METRICS_PORT", "9100")))
+
     # The worker is long-lived but its Redis connection can hit a transient
     # socket timeout; RQ's work() then quits and the process dies, leaving any
     # queued photo job (and thus its matching) silently stalled. Keep the

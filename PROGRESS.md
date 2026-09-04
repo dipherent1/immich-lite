@@ -302,8 +302,48 @@ Time window (simplest option from PHASES.md): an event is joinable when `starts_
 
 ### Notes / next steps (not done yet)
 
-- Prometheus + `/metrics` (queue depth, worker-alive, latency), Grafana dashboards, and alert rules are the remaining "real prod" layer — deliberately deferred (see the taught three-pillar model: logs → metrics → traces). The JSON logs are shaped so a Loki/ELK/CloudWatch agent can ingest them with zero reformatting.
+- **Traces** (OpenTelemetry) are the only remaining "real prod" pillar not yet added — the next layer after logs + metrics (see the taught three-pillar model). The JSON logs are shaped so a Loki/ELK/CloudWatch agent can ingest them with zero reformatting.
 - The pre-existing double-log of unhandled 500s (request middleware logs with traceback, then the global `exception_handler` logs again) is retained for backward compatibility.
+
+## 📈 Observability — Prometheus / Grafana metrics + alerts
+
+**Goal:** numbers over time and a place to look — not just logs. Metrics for HTTP latency/status, RQ queue depth + enqueue rate, a direct worker-alive signal, plus per-service `up` for Redis/Postgres/Qdrant, and **alert rules that would have caught the earlier "worker died / queue stalled" bug on its own**.
+
+### What was done
+
+- **`core/metrics.py` (new)** — Prometheus metrics via `prometheus-client`:
+  - `http_requests_total{method,path,status}` (status class, e.g. `4xx/5xx`), `http_request_duration_seconds{method,path}` (histogram, p50/p95-ready) — `path` is the **route template** (bounded cardinality), observed from the request middleware.
+  - `rq_queue_depth{queue}` **gauge**, refreshed live from Redis on every scrape (`refresh_rq_metrics`), and `rq_jobs_enqueued_total{queue}` counter.
+  - `record_enqueue()` hooked into `core/jobs.py`.
+- **`main.py`** — `GET /metrics` endpoint (unauthenticated, `include_in_schema=False`, warns+skips request-log spam via `_WELL_KNOWN`). Refreshes RQ queue depth before returning `generate_latest()`.
+- **`core/middleware.py`** — observes HTTP metrics (route template, status, duration) for every request before the well-known-path log skip.
+- **`core/worker_metrics.py` (new)** — minimal stdlib `ThreadingHTTPServer` in the worker exposing `/metrics` on `:9100` with a `worker_up` gauge. Serves from the parent process so **`up{job="immich-worker"}` dies the moment the worker process dies** — the direct "is the worker alive" signal. Started in `photo_worker.py::main()`, port from `WORKER_METRICS_PORT` (default 9100).
+- **`docker-compose.yml`** — added exporters + the core stack:
+  - `redis-exporter` (`:9121`), `postgres-exporter` (`:9187`) — Qdrant needs no exporter (it exposes its own `/metrics` on `:6333`).
+  - `prometheus` (`:9090`) — scrapes `app:8000`, `worker:9100`, `qdrant:6333`, `redis-exporter:9121`, `postgres-exporter:9187` every 15s; 15-day retention; loads `monitoring/alerts.yml`.
+  - `alertmanager` (`:9093`) — routes alerts to a configurable webhook (see `monitoring/alertmanager.yml`; example Slack/email receivers commented out).
+  - `grafana` (`:3001`, admin/admin, override via `GRAFANA_ADMIN_PASSWORD`) — auto-provisions the Prometheus datasource + a **"Immich Lite"** dashboard from `monitoring/grafana/`.
+- **New files under `monitoring/`**: `prometheus.yml`, `alerts.yml`, `alertmanager.yml`, `grafana/provisioning/datasources/prometheus.yml`, `grafana/provisioning/dashboards/default.yml`, `grafana/dashboards/immich-lite.json` (panels: per-service `up`, queue depth, job enqueue rate, HTTP rate by status class, HTTP latency p50/p95).
+
+**Alert rules (`monitoring/alerts.yml`, evaluated by Prometheus):**
+- `WorkerDown` (critical) — `up{job="immich-worker"} == 0` for 1m.
+- `QueueGrowingStalled` (warning) — queue depth > 5 and unchanged for 15m (worker not draining).
+- `Http5xxRate` (warning) — 5xx rate > 0.05 req/s over 5m.
+- `QdrantDown` / `RedisDown` / `PostgresDown` (critical) — target `up == 0` for 1m.
+
+### Verified (brought up via `docker compose up -d`)
+
+- ✅ `GET :8080/metrics` → 200, exposing `rq_queue_depth{queue="photos"} 0.0`; a real `GET /api` (404) recorded `http_requests_total{method="GET",path="/api",status="4xx"} 1.0`.
+- ✅ Prometheus scrape state: **all 5 targets `up`** (app, worker, postgres, qdrant, redis).
+- ✅ Prometheus rules list: all 6 alerts loaded and **inactive** (healthy, not firing).
+- ✅ Grafana `:3001` healthy; Prometheus datasource registered; **"Immich Lite"** dashboard provisioned (HTTP 200 via API).
+- ✅ Alertmanager `:9093` up with the webhook route.
+
+### Notes
+
+- Grafana login is `admin` / `admin` by default; set `GRAFANA_ADMIN_PASSWORD` (or in `.env`) for anything other than local dev.
+- Alert *notification* requires wiring the webhook in `monitoring/alertmanager.yml` to a real intake (Slack/email/n8n/n8n webhook). The rules fire in Prometheus regardless; `alertmanager` delivers them.
+- The `worker:9100` and other exporter ports are **not** exposed on the host (only on the docker network) — Prometheus reaches them internally. To hit the worker metrics from your browser, add a `ports:` mapping, but it's unnecessary.
 
 ## ✅ Phase 2 — Face Profile Enrollment ("get scanned")
 
