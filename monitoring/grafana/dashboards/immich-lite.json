@@ -138,6 +138,53 @@
       "targets": [ { "exemplar": true, "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95", "range": true, "refId": "B" }, { "exemplar": true, "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p50", "range": true, "refId": "A" } ],
       "title": "HTTP latency percentiles",
       "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 },
+      "id": 12,
+      "panels": [],
+      "title": "Infrastructure (always live)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 20 },
+      "id": 13,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [ { "exemplar": true, "expr": "redis_memory_used_bytes", "legendFormat": "redis", "range": true, "refId": "A" } ],
+      "title": "Redis memory (bytes)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 20 },
+      "id": 14,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [ { "exemplar": true, "expr": "pg_stat_database_numbackends{datname=\"immich_lite\"}", "legendFormat": "connections", "range": true, "refId": "A" } ],
+      "title": "Postgres connections (immich_lite)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 20 },
+      "id": 15,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [ { "exemplar": true, "expr": "collection_points", "legendFormat": "{{collection}}", "range": true, "refId": "A" } ],
+      "title": "Qdrant points per collection",
+      "type": "timeseries"
     }
   ],
   "refresh": "15s",
@@ -149,6 +196,6 @@
   "timezone": "browser",
   "title": "Immich Lite",
   "uid": "immich-lite-overview",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }
