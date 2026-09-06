@@ -38,6 +38,10 @@ here.
 | `src/app/core/middleware.py` | HTTP request logging + sets `request_id` / `user_id` correlation |
 | `src/app/core/jobs.py` | RQ enqueue logging + sets `job_id`, `photo_id` fields |
 | `src/app/workers/photo_worker.py` | Worker lifecycle + per-job correlation (`get_current_job`) |
+| `src/app/core/sse_relay.py` | Redis→SSE notification relay (persists worker events, dispatches live) |
+| `src/app/core/notification_publisher.py` | Worker-side best-effort Redis publish of match notifications |
+| `src/app/services/notification_service.py` | Notification persistence + dispatch + read-state |
+| `src/app/services/join_request_service.py` | Join-request lifecycle + approval notifications |
 | `src/app/main.py` | Boots `setup_logging()`, global unhandled-exception handler, request middleware |
 | `src/app/core/config.py` | Logging settings (`log_level`, `log_file`, rotation) |
 
@@ -157,6 +161,14 @@ no more "black box".
 - `app.matching` — `no attendees to match against …`, `no faces stored for photo=…`, `photo matched … matches=…`.
 - `app.user` — register/login success + warnings on duplicate-email / failed login (email only, **no password**).
 - `app.auth` — auth failure warnings.
+
+### Notifications & join requests
+
+- `app.notifications` — `notification created` with `user_id` + `type` + `id` fields (any persisted notification: join_request, join_approved, join_denied, photo_matched, photo_processed). On SSE-dispatch failure logs `failed to dispatch SSE notification …` with `exc_info` (the row is still written — dispatch is best-effort).
+- `app.notifications.sse` (in `core/sse_relay.py`) — the background Redis→SSE relay: `notification SSE relay subscribed to notifications:events`, and per-event relay errors. This is the bridge that turns **worker**-published match notifications into persisted rows + live SSE pushes.
+- `app.join_request` — join-request lifecycle (request created, approved, denied) with `event_id` / `requester_id` / `request_id` fields.
+
+The worker publishes match notifications via `core/notification_publisher.py` (logger `app.notifications`: `published notification event user_id=… type=photo_matched`), which the app's `app.notifications.sse` relay later persists + delivers.
 
 ---
 

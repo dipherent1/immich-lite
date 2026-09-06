@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -36,6 +37,31 @@ app.add_middleware(
 app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(api_router)
+
+
+# Strong reference so the background relay task isn't garbage-collected.
+_relay_task = None
+
+
+@app.on_event("startup")
+async def start_notification_relay() -> None:
+    """Start the Redis pub/sub -> SSE relay as a background task so worker-
+    published notifications reach connected browsers."""
+    global _relay_task
+    if _relay_task is not None and not _relay_task.done():
+        return
+    from app.core.sse_relay import notification_relay
+
+    _relay_task = asyncio.create_task(notification_relay())
+
+
+@app.on_event("shutdown")
+async def stop_notification_relay() -> None:
+    global _relay_task
+    if _relay_task is not None:
+        _relay_task.cancel()
+        _relay_task = None
+
 
 logger.info("Application starting up (app=%s v%s)", settings.app_name, settings.app_version)
 

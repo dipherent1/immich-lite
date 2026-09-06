@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import RequireAuth from "@/components/RequireAuth";
 import FaceScan from "@/components/FaceScan";
 import EventsView from "@/components/EventsView";
+import NotificationBell from "@/components/NotificationBell";
 import { ApiError, getMe, logout, type UserResponse } from "@/lib/api";
 
 function DashboardContent() {
@@ -29,7 +30,16 @@ function DashboardContent() {
 
   return (
     <main style={{ padding: 40 }}>
-      <h1>Dashboard</h1>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+        }}
+      >
+        <h1>Dashboard</h1>
+        <NotificationBell />
+      </div>
       {error && <p style={{ color: "red" }}>{error}</p>}
       {user && (
         <dl>

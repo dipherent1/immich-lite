@@ -14,12 +14,16 @@ from app.core.security import decode_access_token
 from app.core.vector_db import EventFaceRepository, QdrantProfileRepository
 from app.models.user import User
 from app.repositories.event_repository import EventRepository
+from app.repositories.join_request_repository import JoinRequestRepository
+from app.repositories.notification_repository import NotificationRepository
 from app.repositories.photo_match_repository import PhotoMatchRepository
 from app.repositories.photo_repository import PhotoRepository
 from app.repositories.user_repository import UserRepository
 from app.services.embedding_service import InsightFaceEmbeddingService
 from app.services.event_service import EventService
+from app.services.join_request_service import JoinRequestService
 from app.services.matching_service import MatchingService
+from app.services.notification_service import NotificationService
 from app.services.photo_service import PhotoService
 from app.services.profile_service import ProfileService
 from app.services.user_service import UserService
@@ -106,6 +110,28 @@ def get_event_service(
     profiles: ProfileService = Depends(get_profile_service),
 ) -> EventService:
     return EventService(repository, profiles)
+
+
+def get_notification_repository(db: Session = Depends(get_db)) -> NotificationRepository:
+    return NotificationRepository(db)
+
+
+def get_notification_service(
+    repository: NotificationRepository = Depends(get_notification_repository),
+) -> NotificationService:
+    return NotificationService(repository)
+
+
+def get_join_request_repository(db: Session = Depends(get_db)) -> JoinRequestRepository:
+    return JoinRequestRepository(db)
+
+
+def get_join_request_service(
+    requests: JoinRequestRepository = Depends(get_join_request_repository),
+    events: EventRepository = Depends(get_event_repository),
+    notifications: NotificationService = Depends(get_notification_service),
+) -> JoinRequestService:
+    return JoinRequestService(requests, events, notifications)
 
 
 def get_current_user(

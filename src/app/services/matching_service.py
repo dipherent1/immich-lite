@@ -41,18 +41,23 @@ class MatchingService:
         self._matches = matches
         self._similarity_threshold = similarity_threshold
 
-    def match_photo(self, photo: Photo) -> int:
-        """Match one already-processed photo. Returns the number of match rows added."""
+    def match_photo(self, photo: Photo) -> set[str]:
+        """Match one already-processed photo.
+
+        Returns the set of attendee user ids the photo matched (for the worker to
+        notify). A photo matching multiple people yields multiple ids.
+        """
         attendee_ids = self._events.list_attendee_ids(photo.event_id)
         if not attendee_ids:
             logger.info("no attendees to match against event=%s photo=%s", photo.event_id, photo.id)
-            return 0
+            return set()
 
         faces = self._faces.get_faces_for_photo(photo.id)
         if not faces:
             logger.info("no faces stored for photo=%s, nothing to match", photo.id)
-            return 0
+            return set()
 
+        matched_user_ids: set[str] = set()
         written = 0
         for face in faces:
             if not face.embedding:
@@ -75,6 +80,7 @@ class MatchingService:
                     },
                 )
                 written += 1
+                matched_user_ids.add(user_id)
 
         logger.info(
             "photo matched event=%s photo=%s faces=%d matches=%d",
@@ -83,7 +89,7 @@ class MatchingService:
             len(faces),
             written,
         )
-        return written
+        return matched_user_ids
 
     def feed(
         self,
