@@ -2,7 +2,3 @@
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
-
-[tool.coverage.run]
-source = ["app"]
-omit = ["app/workers/*", "app/core/worker_metrics.py"]

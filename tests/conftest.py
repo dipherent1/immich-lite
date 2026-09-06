@@ -9,6 +9,9 @@ import pytest
 # already present, so tests get a deterministic secret regardless of .env.
 os.environ.setdefault("JWT_SECRET", "test-secret-for-tests-that-is-at-least-32-bytes-long")
 
+from sqlalchemy.pool import StaticPool
+from sqlmodel import SQLModel, Session, create_engine
+
 from app.core.file_storage import LocalFileService
 from app.core.vector_db import EventFaceRepository, QdrantProfileRepository
 from app.domain.interfaces import EmbeddingProvider
@@ -23,6 +26,21 @@ from app.services.profile_service import ProfileService
 
 def _naive_utc(dt: datetime) -> datetime:
     return dt.replace(tzinfo=None)
+
+
+@pytest.fixture
+def db_session():
+    """Fresh in-memory SQLite session with all tables created for a single test."""
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        yield session
+    SQLModel.metadata.drop_all(engine)
+    engine.dispose()
 
 
 @pytest.fixture
