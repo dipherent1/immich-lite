@@ -1,0 +1,10 @@
+[run]
+source = app
+omit =
+    **/workers/**
+    **/worker_metrics.py
+
+[report]
+omit =
+    **/workers/**
+    **/worker_metrics.py
