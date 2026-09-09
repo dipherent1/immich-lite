@@ -121,13 +121,12 @@ services:
     restart: unless-stopped
 
   app:
-    build: .
+    build: ./backend
     container_name: immich-lite-app
     ports:
       - "8080:8000"
     volumes:
       - ./output:/app/output
-      - ./config.yml:/app/config.yml
       - immich_ml_cache:/root/.cache/immich_ml
     environment:
       - QDRANT_URL=http://qdrant:6333
@@ -145,7 +144,7 @@ services:
     restart: unless-stopped
 
   worker:
-    build: .
+    build: ./backend
     container_name: immich-lite-worker
     command: ["python", "-m", "app.workers.photo_worker"]
     volumes:

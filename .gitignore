@@ -3,6 +3,9 @@
 __pycache__/
 *.pyc
 *.pyo
+*.log
+.coverage
+.pytest_cache/
 embeddings.json
 output/
 logs/
