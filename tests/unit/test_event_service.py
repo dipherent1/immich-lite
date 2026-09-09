@@ -8,8 +8,9 @@ from app.services.event_service import EventService
 
 
 @pytest.fixture
-def service(event_repo, profiles):
-    return EventService(event_repo, profiles)
+def service(event_repo, profiles, matching, notifications):
+    matching.match_new_attendee.return_value = set()
+    return EventService(event_repo, profiles, matching, notifications)
 
 
 def _now() -> datetime:
@@ -143,6 +144,46 @@ def test_join_already_attendee(service, event_repo, make_event):
     event_repo.add_attendee.return_value = False
     _, added = service.join("user-2", "token-abc")
     assert added is False
+
+
+def test_join_triggers_backfill_for_new_attendee(service, event_repo, matching, notifications, make_event):
+    event_repo.get_by_token.return_value = make_event()
+    event_repo.add_attendee.return_value = True
+    matching.match_new_attendee.return_value = {"photo-a", "photo-b"}
+    _, added = service.join("user-2", "token-abc")
+    assert added is True
+    matching.match_new_attendee.assert_called_once_with("event-1", "user-2")
+    notifications.create_match_notifications.assert_called_once_with(
+        user_id="user-2",
+        event_id="event-1",
+        event_name="Test Event",
+        matched_photo_ids={"photo-a", "photo-b"},
+    )
+
+
+def test_join_backfill_skipped_for_existing_attendee(service, event_repo, matching, notifications, make_event):
+    event_repo.get_by_token.return_value = make_event()
+    event_repo.add_attendee.return_value = False
+    service.join("user-2", "token-abc")
+    matching.match_new_attendee.assert_not_called()
+    notifications.create_match_notifications.assert_not_called()
+
+
+def test_join_backfill_no_matches_no_notification(service, event_repo, matching, notifications, make_event):
+    event_repo.get_by_token.return_value = make_event()
+    event_repo.add_attendee.return_value = True
+    matching.match_new_attendee.return_value = set()
+    service.join("user-2", "token-abc")
+    notifications.create_match_notifications.assert_not_called()
+
+
+def test_join_backfill_failure_is_best_effort(service, event_repo, matching, make_event):
+    event_repo.get_by_token.return_value = make_event()
+    event_repo.add_attendee.return_value = True
+    matching.match_new_attendee.side_effect = Exception("qdrant down")
+    event, added = service.join("user-2", "token-abc")
+    assert event.id == "event-1"
+    assert added is True
 
 
 # --- get_by_id ---

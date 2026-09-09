@@ -34,13 +34,13 @@ def _photo(event_id="event-1"):
 
 def test_match_photo_no_attendees(service, event_repo):
     event_repo.list_attendee_ids.return_value = []
-    assert service.match_photo(_photo()) == 0
+    assert service.match_photo(_photo()) == set()
 
 
 def test_match_photo_no_faces(service, event_repo, event_face_repo):
     event_repo.list_attendee_ids.return_value = ["user-1", "user-2"]
     event_face_repo.get_faces_for_photo.return_value = []
-    assert service.match_photo(_photo()) == 0
+    assert service.match_photo(_photo()) == set()
 
 
 def test_match_photo_success(service, event_repo, event_face_repo, profile_repo, match_repo):
@@ -48,9 +48,9 @@ def test_match_photo_success(service, event_repo, event_face_repo, profile_repo,
     event_face_repo.get_faces_for_photo.return_value = [_face()]
     profile_repo.query_similar_restricted.return_value = [("user-2", 0.95)]
 
-    written = service.match_photo(_photo())
+    matched = service.match_photo(_photo())
 
-    assert written == 1
+    assert matched == {"user-2"}
     profile_repo.query_similar_restricted.assert_called_once()
     args, kwargs = profile_repo.query_similar_restricted.call_args
     assert set(args[1]) == {"user-1", "user-2"}
@@ -67,7 +67,7 @@ def test_match_photo_below_threshold(service, event_repo, event_face_repo, profi
     event_repo.list_attendee_ids.return_value = ["user-1"]
     event_face_repo.get_faces_for_photo.return_value = [_face()]
     profile_repo.query_similar_restricted.return_value = []  # filter already applied
-    assert service.match_photo(_photo()) == 0
+    assert service.match_photo(_photo()) == set()
     match_repo.upsert_best.assert_not_called()
 
 
@@ -81,9 +81,10 @@ def test_match_photo_multiple_faces_same_person(service, event_repo, event_face_
         [("user-1", 0.9)],
     ]
 
-    written = service.match_photo(_photo())
+    matched = service.match_photo(_photo())
 
-    assert written == 2
+    # Same person from two faces → one user id in the returned set.
+    assert matched == {"user-1"}
     assert match_repo.upsert_best.call_count == 2
     # upsert_best itself keeps the higher similarity per (photo, user)
 
@@ -92,7 +93,7 @@ def test_match_photo_empty_embedding_skipped(service, event_repo, event_face_rep
     event_repo.list_attendee_ids.return_value = ["user-1"]
     empty = FaceEmbedding(image_path="", embedding=[], bbox=BoundingBox(1, 1, 2, 2), face_score=0.9)
     event_face_repo.get_faces_for_photo.return_value = [empty]
-    assert service.match_photo(_photo()) == 0
+    assert service.match_photo(_photo()) == set()
     profile_repo.query_similar_restricted.assert_not_called()
 
 
@@ -102,7 +103,70 @@ def test_match_photo_scoped_to_attendees(service, event_repo, event_face_repo, p
     event_repo.list_attendee_ids.return_value = ["user-1"]
     event_face_repo.get_faces_for_photo.return_value = [_face()]
     profile_repo.query_similar_restricted.return_value = []
-    assert service.match_photo(_photo()) == 0
+    assert service.match_photo(_photo()) == set()
+
+
+# --- match_new_attendee (join/approve backfill) ---
+
+
+def test_match_new_attendee_no_profile(service, event_face_repo, profile_repo, match_repo):
+    profile_repo.has_profile.return_value = False
+    assert service.match_new_attendee("event-1", "user-9") == set()
+    event_face_repo.get_faces_for_event.assert_not_called()
+    match_repo.upsert_best.assert_not_called()
+
+
+def test_match_new_attendee_no_faces(service, event_face_repo, profile_repo, match_repo):
+    profile_repo.has_profile.return_value = True
+    event_face_repo.get_faces_for_event.return_value = []
+    assert service.match_new_attendee("event-1", "user-9") == set()
+    profile_repo.query_similar_restricted.assert_not_called()
+
+
+def test_match_new_attendee_success(service, event_face_repo, profile_repo, match_repo):
+    profile_repo.has_profile.return_value = True
+    event_face_repo.get_faces_for_event.return_value = [
+        ("photo-a", _face(vector=(0.1,) * 512, bbox=BoundingBox(1, 0, 2, 1))),
+        ("photo-b", _face(vector=(0.2,) * 512, bbox=BoundingBox(3, 0, 4, 1))),
+    ]
+    profile_repo.query_similar_restricted.return_value = [("user-9", 0.85)]
+
+    matched = service.match_new_attendee("event-1", "user-9")
+
+    assert matched == {"photo-a", "photo-b"}
+    assert match_repo.upsert_best.call_count == 2
+    match_repo.upsert_best.assert_any_call(
+        photo_id="photo-a",
+        user_id="user-9",
+        similarity=0.85,
+        bbox={"x1": 1, "y1": 0, "x2": 2, "y2": 1},
+    )
+
+
+def test_match_new_attendee_below_threshold(service, event_face_repo, profile_repo, match_repo):
+    profile_repo.has_profile.return_value = True
+    event_face_repo.get_faces_for_event.return_value = [("photo-a", _face())]
+    profile_repo.query_similar_restricted.return_value = []
+    assert service.match_new_attendee("event-1", "user-9") == set()
+    match_repo.upsert_best.assert_not_called()
+
+
+def test_match_new_attendee_ignores_other_users(service, event_face_repo, profile_repo, match_repo):
+    # A hit for someone else (non-determinism in the limited-scope query) must
+    # never be written for the new attendee.
+    profile_repo.has_profile.return_value = True
+    event_face_repo.get_faces_for_event.return_value = [("photo-a", _face())]
+    profile_repo.query_similar_restricted.return_value = [("someone-else", 0.9)]
+    assert service.match_new_attendee("event-1", "user-9") == set()
+    match_repo.upsert_best.assert_not_called()
+
+
+def test_match_new_attendee_empty_embedding_skipped(service, event_face_repo, profile_repo, match_repo):
+    profile_repo.has_profile.return_value = True
+    empty = FaceEmbedding(image_path="", embedding=[], bbox=BoundingBox(1, 1, 2, 2), face_score=0.9)
+    event_face_repo.get_faces_for_event.return_value = [("photo-a", empty)]
+    assert service.match_new_attendee("event-1", "user-9") == set()
+    profile_repo.query_similar_restricted.assert_not_called()
 
 
 def test_feed_delegates(service, match_repo):

@@ -18,9 +18,13 @@ from app.domain.interfaces import EmbeddingProvider
 from app.models.event import Event
 from app.models.user import User
 from app.repositories.event_repository import EventRepository
+from app.repositories.join_request_repository import JoinRequestRepository
+from app.repositories.notification_repository import NotificationRepository
 from app.repositories.photo_match_repository import PhotoMatchRepository
 from app.repositories.photo_repository import PhotoRepository
 from app.repositories.user_repository import UserRepository
+from app.services.matching_service import MatchingService
+from app.services.notification_service import NotificationService
 from app.services.profile_service import ProfileService
 
 
@@ -86,6 +90,26 @@ def event_face_repo():
 @pytest.fixture
 def profiles():
     return MagicMock(spec=ProfileService)
+
+
+@pytest.fixture
+def matching():
+    return MagicMock(spec=MatchingService)
+
+
+@pytest.fixture
+def notifications():
+    return MagicMock(spec=NotificationService)
+
+
+@pytest.fixture
+def notification_repo():
+    return MagicMock(spec=NotificationRepository)
+
+
+@pytest.fixture
+def join_request_repo():
+    return MagicMock(spec=JoinRequestRepository)
 
 
 @pytest.fixture
