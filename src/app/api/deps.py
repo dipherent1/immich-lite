@@ -105,13 +105,6 @@ def get_matching_service(
     )
 
 
-def get_event_service(
-    repository: EventRepository = Depends(get_event_repository),
-    profiles: ProfileService = Depends(get_profile_service),
-) -> EventService:
-    return EventService(repository, profiles)
-
-
 def get_notification_repository(db: Session = Depends(get_db)) -> NotificationRepository:
     return NotificationRepository(db)
 
@@ -122,6 +115,15 @@ def get_notification_service(
     return NotificationService(repository)
 
 
+def get_event_service(
+    repository: EventRepository = Depends(get_event_repository),
+    profiles: ProfileService = Depends(get_profile_service),
+    matching: MatchingService = Depends(get_matching_service),
+    notifications: NotificationService = Depends(get_notification_service),
+) -> EventService:
+    return EventService(repository, profiles, matching, notifications)
+
+
 def get_join_request_repository(db: Session = Depends(get_db)) -> JoinRequestRepository:
     return JoinRequestRepository(db)
 
@@ -130,8 +132,9 @@ def get_join_request_service(
     requests: JoinRequestRepository = Depends(get_join_request_repository),
     events: EventRepository = Depends(get_event_repository),
     notifications: NotificationService = Depends(get_notification_service),
+    matching: MatchingService = Depends(get_matching_service),
 ) -> JoinRequestService:
-    return JoinRequestService(requests, events, notifications)
+    return JoinRequestService(requests, events, notifications, matching)
 
 
 def get_current_user(

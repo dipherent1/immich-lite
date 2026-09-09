@@ -10,6 +10,7 @@ from app.models.user import User
 from app.repositories.event_repository import EventRepository
 from app.repositories.join_request_repository import JoinRequestRepository
 from app.services.event_service import EventService
+from app.services.matching_service import MatchingService
 from app.services.notification_service import NotificationService
 
 logger = logging.getLogger("app.join_request")
@@ -26,10 +27,12 @@ class JoinRequestService:
         requests: JoinRequestRepository,
         events: EventRepository,
         notifications: NotificationService,
+        matching: MatchingService,
     ) -> None:
         self._requests = requests
         self._events = events
         self._notifications = notifications
+        self._matching = matching
 
     def request_to_join(self, requester: User, event_id: str) -> JoinRequest:
         event = self._events.get_by_id(event_id)
@@ -135,6 +138,9 @@ class JoinRequestService:
                 subject_type="event",
                 subject_id=event.id,
             )
+        if added:
+            # Backfill: match the brand-new attendee against existing photos.
+            self._backfill_new_attendee(event, req.requester_id)
         logger.info(
             "join request approved",
             extra={
@@ -146,6 +152,21 @@ class JoinRequestService:
             },
         )
         return resolved
+
+    def _backfill_new_attendee(self, event: Event, user_id: str) -> None:
+        """Match a newly-approved attendee against the event's existing photos
+        and notify them. Best-effort: a Qdrant failure must never break approval."""
+        try:
+            matched_photo_ids = self._matching.match_new_attendee(event.id, user_id)
+            if matched_photo_ids:
+                self._notifications.create_match_notifications(
+                    user_id=user_id,
+                    event_id=event.id,
+                    event_name=event.name,
+                    matched_photo_ids=matched_photo_ids,
+                )
+        except Exception:
+            logger.exception("attendee backfill failed event=%s user=%s", event.id, user_id)
 
     def deny(self, owner_id: str, event_id: str, request_id: str) -> JoinRequest:
         event, _req = self._get_pending(owner_id, event_id, request_id)

@@ -1,6 +1,8 @@
 # Notifications & Join Requests — Implementation Plan
 
 > ✅ **COMPLETE** — all phases (A–I) implemented and verified end-to-end against the rebuilt Docker stack. See the "Notifications & Join Requests" section in [PROGRESS.md](PROGRESS.md) for what was done and the verification results.
+>
+> **Follow-up (also done):** attendee **backfill** — a user who joins (share link) or is approved (join request) *after* photos exist is now matched against those photos (`MatchingService.match_new_attendee`), writes `PhotoMatch` rows, and gets `photo_matched` notifications. See "Attendee backfill" in PROGRESS.md.
 
 ## Overview
 

@@ -10,6 +10,8 @@ from app.models.event import Event
 from app.models.user import User
 from app.repositories.event_repository import EventRepository
 from app.schemas.event import EventCreate
+from app.services.matching_service import MatchingService
+from app.services.notification_service import NotificationService
 from app.services.profile_service import ProfileService
 
 logger = logging.getLogger("app.event")
@@ -26,9 +28,17 @@ class EventService:
     any owner-toggled `is_open` boolean.
     """
 
-    def __init__(self, repository: EventRepository, profiles: ProfileService) -> None:
+    def __init__(
+        self,
+        repository: EventRepository,
+        profiles: ProfileService,
+        matching: MatchingService,
+        notifications: NotificationService,
+    ) -> None:
         self._repository = repository
         self._profiles = profiles
+        self._matching = matching
+        self._notifications = notifications
 
     @staticmethod
     def _naive_utc(dt: datetime) -> datetime:
@@ -97,8 +107,27 @@ class EventService:
                 detail="This event link is no longer active",
             )
         added = self._repository.add_attendee(event.id, user_id)
+        if added:
+            # New attendee: match them against any photos that already exist
+            # (upload-time matching only covered the attendees present then).
+            self._backfill_new_attendee(event, user_id)
         logger.info("user joined event id=%s user=%s (new=%s)", event.id, user_id, added)
         return event, added
+
+    def _backfill_new_attendee(self, event: Event, user_id: str) -> None:
+        """Match a newly-joined attendee against the event's existing photos and
+        notify them. Best-effort: a Qdrant failure must never break joining."""
+        try:
+            matched_photo_ids = self._matching.match_new_attendee(event.id, user_id)
+            if matched_photo_ids:
+                self._notifications.create_match_notifications(
+                    user_id=user_id,
+                    event_id=event.id,
+                    event_name=event.name,
+                    matched_photo_ids=matched_photo_ids,
+                )
+        except Exception:
+            logger.exception("attendee backfill failed event=%s user=%s", event.id, user_id)
 
     def get_by_id(self, user_id: str, event_id: str) -> tuple[Event, int]:
         event = self._repository.get_by_id(event_id)

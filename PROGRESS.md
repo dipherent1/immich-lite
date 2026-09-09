@@ -32,6 +32,18 @@ Tracks completed work against [PHASES.md](PHASES.md). See [TODO.md](TODO.md) for
 - **`components/EventsView.tsx`** — search results now show a "Request to join" button (and pending state) instead of the "coming soon" note.
 - **`app/events/[id]/page.tsx`** — owner-only "Join requests" section with Approve/Deny, loaded when `ev.is_owner`.
 
+### Attendee backfill — match existing photos when someone joins
+
+**Situation fixed:** photos are matched exactly once, at upload time, against whichever attendees exist *then*. A user who joins (share link) or is approved (join request) after photos already exist never got those matches.
+
+**Fix:** when a user **newly** becomes an attendee, backfill matching runs them against the event's already-stored faces:
+
+- `EventFaceRepository.get_faces_for_event(event_id)` — scrolls `event_faces` by payload `event_id`, returning `(photo_id, FaceEmbedding)` pairs (shared `_scroll_faces` helper refactored out of `get_faces_for_photo`).
+- `MatchingService.match_new_attendee(event_id, user_id)` — if the user has a profile, iterates every stored event face, runs the same restricted `user_profiles` similarity search (`query_similar_restricted` filtered to just that user, above threshold), and `upsert_best`s a `PhotoMatch` per (photo, user). Returns the matched photo id set. Skips users with no profile.
+- `NotificationService.create_match_notifications(...)` — notifies the new attendee per matched photo with the same `photo_matched` payload the worker emits for upload-time matches (title "New match found!", subject `event`).
+- Wired into **both** entry points, gated on `added` (idempotent `add_attendee` → only genuinely-new attendees): `EventService.join` (share link) and `JoinRequestService.approve` (join request). Both wrap it in try/except — a Qdrant hiccup must never break join/approve.
+- No uploader-skip needed: uploading already requires membership (`PhotoService._ensure_member`), so a newly-added attendee can never be the uploader of any pre-existing photo.
+
 ### Verified (rebuilt `app` + `worker`)
 
 - ✅ Migration applies + rolls back cleanly (downgrade → re-upgrade).
@@ -40,6 +52,7 @@ Tracks completed work against [PHASES.md](PHASES.md). See [TODO.md](TODO.md) for
 - ✅ Notification read lifecycle: unread count, `PATCH /{id}/read`, `PATCH /read-all` (204), count back to 0.
 - ✅ **SSE real-time:** opening the owner's `/notifications/stream` and triggering a join request delivered the `join_request` event live (event name `notification`), and a **match event delivered via the worker→Redis→relay path** over a live SSE stream (payload intact).
 - ✅ **Worker match notifications:** uploading a face photo to an event as a member → worker matched an attendee → that attendee received a persisted `photo_matched` notification (subject `event`) — after the relay-strong-reference fix.
+- ✅ **Attendee backfill:** with a processed existing photo in the event, (a) a new user joining via **share link** immediately got a `PhotoMatch` row (visible in `/matches/me`) and a `photo_matched` notification; (b) a requester **approved** by the owner got the same; (c) a user with **no face profile** joined with no error and no matches; (d) **rejoining** was idempotent (no duplicate notifications). (14/14 automated checks passed.)
 - ✅ Frontend `eslint` (only the pre-existing `RequireAuth`/`FaceScan` issues) and `npm run build` pass (includes the `/notifications` route).
 
 ### Notes / issues hit

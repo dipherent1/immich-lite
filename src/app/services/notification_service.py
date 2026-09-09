@@ -74,3 +74,27 @@ class NotificationService:
 
     def mark_all_read(self, user_id: str) -> None:
         self._repository.mark_all_read(user_id)
+
+    def create_match_notifications(
+        self,
+        *,
+        user_id: str,
+        event_id: str,
+        event_name: str,
+        matched_photo_ids: set[str],
+    ) -> None:
+        """Notify an attendee about existing photos that matched them.
+
+        Used by attendee backfill (join / join-request approval) — same payload
+        shape the worker publishes for upload-time matches, so the frontend
+        renders them identically.
+        """
+        for _ in sorted(matched_photo_ids):
+            self.create(
+                user_id=user_id,
+                type="photo_matched",
+                title="New match found!",
+                body=f"A photo in {event_name} matches your face",
+                subject_type="event",
+                subject_id=event_id,
+            )
