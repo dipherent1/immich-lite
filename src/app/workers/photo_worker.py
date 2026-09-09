@@ -79,10 +79,36 @@ def process_photo(photo_id: str) -> int:
         )
         # Matching is a separate, independently testable service call that runs
         # automatically after embedding is stored (Phase 5).
-        return matching.match_photo(photo)
+        matched_user_ids = matching.match_photo(photo)
+        _publish_match_notifications(photo, matched_user_ids, db)
+        return matched_user_ids
     finally:
         db.close()
         clear_correlation()
+
+
+def _publish_match_notifications(photo, matched_user_ids: set[str], db) -> None:
+    """Notify every attendee whose face matched this photo. Best-effort: a
+    notification failure never marks the job as failed (publish_notification
+    already swallows Redis errors)."""
+    from app.core.notification_publisher import publish_notification
+    from app.repositories.event_repository import EventRepository
+
+    event_repo = EventRepository(db)
+    event = event_repo.get_by_id(photo.event_id)
+    event_name = event.name if event is not None else "the event"
+    for user_id in matched_user_ids:
+        # Never notify the uploader for their own upload (they know they added it).
+        if user_id == photo.uploader_user_id:
+            continue
+        publish_notification(
+            user_id=user_id,
+            type="photo_matched",
+            title="New match found!",
+            body=f"A photo in {event_name} matches your face",
+            subject_type="event",
+            subject_id=photo.event_id,
+        )
 
 
 def main() -> None:

@@ -8,9 +8,13 @@ import RequireAuth from "@/components/RequireAuth";
 import PhotoGrid from "@/components/PhotoGrid";
 import {
   ApiError,
+  approveRequest,
+  denyRequest,
   getEvent,
+  listPendingRequests,
   uploadEventPhoto,
   type EventDetailResponse,
+  type JoinRequestResponse,
 } from "@/lib/api";
 
 function joinLinkFor(token: string): string {
@@ -32,6 +36,8 @@ function EventPreviewContent() {
   const [uploading, setUploading] = useState(false);
   const [uploadNote, setUploadNote] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [joinRequests, setJoinRequests] = useState<JoinRequestResponse[]>([]);
+  const [requestsNote, setRequestsNote] = useState<string | null>(null);
   const previewUrlsRef = useRef<string[]>([]);
 
   useEffect(() => {
@@ -42,11 +48,44 @@ function EventPreviewContent() {
   useEffect(() => {
     if (!eventId) return;
     getEvent(eventId)
-      .then(setEvent)
+      .then((ev) => {
+        setEvent(ev);
+        if (ev.is_owner) loadJoinRequests(ev.id);
+      })
       .catch((err) =>
         setError(err instanceof ApiError ? err.detail : "Could not load this event."),
       );
   }, [eventId]);
+
+  function loadJoinRequests(id: string) {
+    listPendingRequests(id)
+      .then(setJoinRequests)
+      .catch(() => setJoinRequests([]));
+  }
+
+  async function handleApprove(requestId: string) {
+    try {
+      await approveRequest(eventId, requestId);
+      setRequestsNote("Request approved — they're now an attendee.");
+      loadJoinRequests(eventId);
+    } catch (err) {
+      setRequestsNote(
+        err instanceof ApiError ? err.detail : "Could not approve that request.",
+      );
+    }
+  }
+
+  async function handleDeny(requestId: string) {
+    try {
+      await denyRequest(eventId, requestId);
+      setRequestsNote("Request denied.");
+      loadJoinRequests(eventId);
+    } catch (err) {
+      setRequestsNote(
+        err instanceof ApiError ? err.detail : "Could not deny that request.",
+      );
+    }
+  }
 
   // Selecting files only queues them (with thumbnails) — upload happens when the
   // button is hit.
@@ -288,6 +327,62 @@ function EventPreviewContent() {
               </p>
             )}
           </div>
+
+          {event.is_owner && (
+            <div style={{ marginTop: 24, border: "1px solid #ddd", borderRadius: 8, padding: 16, maxWidth: 520 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 600, marginTop: 0 }}>
+                Join requests
+                {joinRequests.length > 0 && ` (${joinRequests.length} pending)`}
+              </h2>
+              {requestsNote && (
+                <p style={{ color: requestsNote.startsWith("Could") ? "#cf222e" : "#1a7f37", margin: "8px 0" }}>
+                  {requestsNote}
+                </p>
+              )}
+              {joinRequests.length === 0 ? (
+                <p style={{ color: "#666", margin: 0 }}>No pending join requests.</p>
+              ) : (
+                <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                  {joinRequests.map((req) => (
+                    <li
+                      key={req.id}
+                      style={{
+                        display: "flex",
+                        gap: 10,
+                        alignItems: "center",
+                        padding: "10px 0",
+                        borderBottom: "1px solid #eee",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <div>
+                        <strong>{req.requester_name}</strong>
+                        <p style={{ margin: "2px 0 0", color: "#666", fontSize: "0.85rem" }}>
+                          Requested {new Date(req.created_at).toLocaleString()}
+                        </p>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          type="button"
+                          onClick={() => handleApprove(req.id)}
+                          style={{ cursor: "pointer", padding: "4px 12px", background: "#e6f6ee", border: "1px solid #1a7f37", borderRadius: 6, color: "#1a7f37" }}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeny(req.id)}
+                          style={{ cursor: "pointer", padding: "4px 12px", background: "#fff", border: "1px solid #cf222e", borderRadius: 6, color: "#cf222e" }}
+                        >
+                          Deny
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           <PhotoGrid eventId={eventId} refreshKey={refreshKey} />
         </>

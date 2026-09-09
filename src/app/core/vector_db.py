@@ -205,17 +205,14 @@ class EventFaceRepository:
         logger.info("Upserted %d face point(s) event=%s photo=%s", len(points), event_id, photo_id)
         return len(points)
 
-    def get_faces_for_photo(self, photo_id: str) -> list[FaceEmbedding]:
-        """Return every face vector (with bbox) stored for a single photo.
+    def _scroll_faces(self, query_filter: Filter) -> list[tuple[str, FaceEmbedding]]:
+        """Scroll stored face points matching ``query_filter``.
 
-        Used by matching (Phase 5): after ingestion upserts a photo's faces here,
-        matching reads them back and, for each face vector, searches `user_profiles`
-        restricted to the event's attendees.
+        Returns ``(photo_id, FaceEmbedding)`` pairs so callers can link a face
+        back to the photo it came from (needed by backfill matching). The photo
+        id is '' for any legacy point that lacks a payload photo_id.
         """
-        query_filter = Filter(
-            must=[FieldCondition(key="photo_id", match=MatchValue(value=photo_id))]
-        )
-        faces: list[FaceEmbedding] = []
+        faces: list[tuple[str, FaceEmbedding]] = []
         offset = None
         while True:
             page, offset = self._client.scroll(
@@ -229,21 +226,51 @@ class EventFaceRepository:
             for point in page:
                 p = point.payload or {}
                 faces.append(
-                    FaceEmbedding(
-                        image_path="",
-                        embedding=list(point.vector or []),
-                        bbox=BoundingBox(
-                            x1=int(p.get("bbox_x1", 0)),
-                            y1=int(p.get("bbox_y1", 0)),
-                            x2=int(p.get("bbox_x2", 0)),
-                            y2=int(p.get("bbox_y2", 0)),
+                    (
+                        str(p.get("photo_id", "")) if p.get("photo_id") else "",
+                        FaceEmbedding(
+                            image_path="",
+                            embedding=list(point.vector or []),
+                            bbox=BoundingBox(
+                                x1=int(p.get("bbox_x1", 0)),
+                                y1=int(p.get("bbox_y1", 0)),
+                                x2=int(p.get("bbox_x2", 0)),
+                                y2=int(p.get("bbox_y2", 0)),
+                            ),
+                            face_score=float(p.get("face_score", 0.0)),
                         ),
-                        face_score=float(p.get("face_score", 0.0)),
                     )
                 )
             if offset is None:
                 break
+        return faces
+
+    def get_faces_for_photo(self, photo_id: str) -> list[FaceEmbedding]:
+        """Return every face vector (with bbox) stored for a single photo.
+
+        Used by matching (Phase 5): after ingestion upserts a photo's faces here,
+        matching reads them back and, for each face vector, searches `user_profiles`
+        restricted to the event's attendees.
+        """
+        query_filter = Filter(
+            must=[FieldCondition(key="photo_id", match=MatchValue(value=photo_id))]
+        )
+        faces = [face for _, face in self._scroll_faces(query_filter)]
         logger.debug("loaded %d face(s) for photo=%s", len(faces), photo_id)
+        return faces
+
+    def get_faces_for_event(self, event_id: str) -> list[tuple[str, FaceEmbedding]]:
+        """Return every stored face of an event as ``(photo_id, FaceEmbedding)``.
+
+        Used for backfill matching: when an attendee joins (share link) or is
+        approved after photos already exist, matching iterates these to find
+        photos that match the new attendee's face profile.
+        """
+        query_filter = Filter(
+            must=[FieldCondition(key="event_id", match=MatchValue(value=event_id))]
+        )
+        faces = self._scroll_faces(query_filter)
+        logger.debug("loaded %d face(s) for event=%s", len(faces), event_id)
         return faces
 
 

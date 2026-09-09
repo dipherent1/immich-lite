@@ -9,6 +9,7 @@ import {
   createEvent,
   joinEvent,
   listMyEvents,
+  requestToJoin,
   searchEvents,
   type EventPublicResponse,
   type EventResponse,
@@ -52,6 +53,12 @@ export default function EventsView() {
   const [joinInput, setJoinInput] = useState("");
   const [joining, setJoining] = useState(false);
   const [joinMessage, setJoinMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Request-to-join (searcher): track per-event submission state.
+  const [requestingEvent, setRequestingEvent] = useState<string | null>(null);
+  const [requestNote, setRequestNote] = useState<Record<string, { ok: boolean; text: string }>>(
+    {},
+  );
 
   const refreshMine = useCallback(() => {
     listMyEvents()
@@ -119,6 +126,28 @@ export default function EventsView() {
       await navigator.clipboard.writeText(joinLinkFor(token));
     } catch {
       // Clipboard may be unavailable; ignore.
+    }
+  }
+
+  async function handleRequestToJoin(eventId: string) {
+    setRequestingEvent(eventId);
+    setRequestNote((prev) => ({ ...prev, [eventId]: undefined as never }));
+    try {
+      await requestToJoin(eventId);
+      setRequestNote((prev) => ({
+        ...prev,
+        [eventId]: { ok: true, text: "Request sent! The owner will be notified." },
+      }));
+    } catch (err) {
+      setRequestNote((prev) => ({
+        ...prev,
+        [eventId]: {
+          ok: false,
+          text: err instanceof ApiError ? err.detail : "Could not send the request.",
+        },
+      }));
+    } finally {
+      setRequestingEvent(null);
     }
   }
 
@@ -291,10 +320,26 @@ export default function EventsView() {
                 ? `Closes ${new Date(ev.expires_at).toLocaleString()}`
                 : "No closing time set"}
             </p>
-            <p style={styles.muted}>
-              Requesting to join is coming soon — you can join if the owner
-              shares their link with you.
-            </p>
+            {ev.active && (
+              <div style={{ marginTop: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => handleRequestToJoin(ev.id)}
+                  disabled={requestingEvent === ev.id}
+                  style={{ padding: "6px 14px", cursor: "pointer" }}
+                >
+                  {requestingEvent === ev.id ? "Requesting…" : "Request to join"}
+                </button>
+                {requestNote[ev.id] && (
+                  <p style={requestNote[ev.id]?.ok ? styles.ok : styles.error}>
+                    {requestNote[ev.id]?.text}
+                  </p>
+                )}
+              </div>
+            )}
+            {!ev.active && (
+              <p style={styles.muted}>This event is closed and no longer accepting members.</p>
+            )}
           </div>
         ))}
         {searching ? <p style={styles.muted}>Searching…</p> : null}

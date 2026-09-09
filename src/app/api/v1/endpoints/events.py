@@ -90,6 +90,7 @@ def get_event(
     return EventDetailResponse(
         **_to_response(event).model_dump(),
         attendee_count=attendee_count,
+        is_owner=event.owner_id == current_user.id,
     )
 
 

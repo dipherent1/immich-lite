@@ -43,6 +43,7 @@ class EventPublicResponse(BaseModel):
 
 class EventDetailResponse(EventResponse):
     attendee_count: int
+    is_owner: bool = False
 
 
 class EventJoinResponse(BaseModel):

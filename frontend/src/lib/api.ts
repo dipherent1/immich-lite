@@ -88,7 +88,10 @@ async function request<T>(
     throw new ApiError(res.status, detail);
   }
 
-  return (await res.json()) as T;
+  // 204 No Content (and other empty bodies) resolve to undefined.
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 /** Fetches an authenticated resource as a binary blob and returns an object URL
@@ -154,6 +157,7 @@ export interface EventPublicResponse {
 
 export interface EventDetailResponse extends EventResponse {
   attendee_count: number;
+  is_owner: boolean;
 }
 
 export interface EventJoinResponse {
@@ -346,4 +350,120 @@ export async function getMyMatches(
     `/api/v1/matches/me?offset=${offset}&limit=${limit}`,
     { authenticated: true },
   );
+}
+
+// --- Join requests ---------------------------------------------------------
+
+export interface JoinRequestResponse {
+  id: string;
+  event_id: string;
+  requester_id: string;
+  requester_name: string;
+  status: string;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export interface JoinRequestActionResponse {
+  request: JoinRequestResponse;
+  message: string;
+}
+
+/** Request to join an event (search-discovered events; owner must approve). */
+export async function requestToJoin(eventId: string): Promise<JoinRequestResponse> {
+  return request<JoinRequestResponse>(
+    `/api/v1/events/${encodeURIComponent(eventId)}/join-request`,
+    { method: "POST", authenticated: true },
+  );
+}
+
+/** Lists an event's pending join requests (owner only). */
+export async function listPendingRequests(
+  eventId: string,
+): Promise<JoinRequestResponse[]> {
+  return request<JoinRequestResponse[]>(
+    `/api/v1/events/${encodeURIComponent(eventId)}/join-requests`,
+    { authenticated: true },
+  );
+}
+
+/** Approves a join request, making the requester an attendee (owner only). */
+export async function approveRequest(
+  eventId: string,
+  requestId: string,
+): Promise<JoinRequestActionResponse> {
+  return request<JoinRequestActionResponse>(
+    `/api/v1/events/${encodeURIComponent(eventId)}/join-requests/${encodeURIComponent(requestId)}/approve`,
+    { method: "PATCH", authenticated: true },
+  );
+}
+
+/** Denies a join request (owner only). */
+export async function denyRequest(
+  eventId: string,
+  requestId: string,
+): Promise<JoinRequestActionResponse> {
+  return request<JoinRequestActionResponse>(
+    `/api/v1/events/${encodeURIComponent(eventId)}/join-requests/${encodeURIComponent(requestId)}/deny`,
+    { method: "PATCH", authenticated: true },
+  );
+}
+
+// --- Notifications ---------------------------------------------------------
+
+export interface NotificationResponse {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  subject_type: string | null;
+  subject_id: string | null;
+  is_read: boolean;
+  created_at: string;
+}
+
+export interface NotificationListResponse {
+  items: NotificationResponse[];
+  has_more: boolean;
+  next_offset: number;
+}
+
+export interface UnreadCountResponse {
+  count: number;
+}
+
+/** The current user's notifications, newest first, paginated. */
+export async function getNotifications(
+  offset = 0,
+  limit = 24,
+): Promise<NotificationListResponse> {
+  return request<NotificationListResponse>(
+    `/api/v1/notifications?offset=${offset}&limit=${limit}`,
+    { authenticated: true },
+  );
+}
+
+/** The current user's unread notification count (for the bell badge). */
+export async function getUnreadCount(): Promise<UnreadCountResponse> {
+  return request<UnreadCountResponse>("/api/v1/notifications/unread-count", {
+    authenticated: true,
+  });
+}
+
+/** Marks a single notification as read. */
+export async function markNotificationRead(
+  notificationId: string,
+): Promise<NotificationResponse> {
+  return request<NotificationResponse>(
+    `/api/v1/notifications/${encodeURIComponent(notificationId)}/read`,
+    { method: "PATCH", authenticated: true },
+  );
+}
+
+/** Marks all of the current user's notifications as read. */
+export async function markAllNotificationsRead(): Promise<void> {
+  await request<void>("/api/v1/notifications/read-all", {
+    method: "PATCH",
+    authenticated: true,
+  });
 }

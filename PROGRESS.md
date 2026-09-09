@@ -2,6 +2,66 @@
 
 Tracks completed work against [PHASES.md](PHASES.md). See [TODO.md](TODO.md) for what's remaining.
 
+## ✅ Notifications & Join Requests
+
+**Goal:** approval-gated join requests (search → request → owner approve/deny, while share links stay instant-join), plus a persistent notification system (Postgres `notifications`) delivered live over SSE, and the matching frontend (bell + dropdown + full `/notifications` page). Photo-processing *status* live updates are explicitly deferred (kept as manual refresh).
+
+**Status:** Complete. Backend flows + SSE + worker-path all verified against the rebuilt Docker stack.
+
+### Backend
+
+- **Models** (`models/join_request.py`, `models/notification.py`) — `JoinRequest` (pending→approved|denied, partial unique index on pending per event+requester) and `Notification` (types: `join_request`, `join_approved`, `join_denied`, `photo_matched`, `photo_processed`; `type`, `title`, `body`, `subject_type`/`subject_id`, `is_read`). Registered in `models/__init__.py`.
+- **Migration `0005_create_join_requests_and_notifications.py`** (rev `0005_create_join_requests`) — creates both tables; applies and rolls back cleanly to `0004_create_photo_matches`.
+- **Repositories** — `join_request_repository.py` (create / get_by_id / get_pending_for_event / get_requester / get_by_event_and_requester / resolve; IntegrityError→ValueError on dup pending) and `notification_repository.py` (create / list_for_user / unread_count / get_by_id / mark_read / mark_all_read).
+- **`services/join_request_service.py`** — `request_to_join` (404 unknown event, 410 inactive, 400 already attendee, 409 dup pending), `list_pending` + `approve` + `deny` (owner-checked 403; approve writes the `EventAttendee`, deny sets denied); on approve/deny notifies the requester. `get_requester_name` supplies the name into the response schema.
+- **`services/notification_service.py`** — `create` persists the row then best-effort dispatches to the user's live SSE connection (row = source of truth, push = optimization); `list_for_user` / `unread_count` / `get_by_id` / `mark_read` / `mark_all_read`.
+- **`core/sse.py`** — `SSEManager` (per-user queue registry) + module `sse_manager` singleton; `_notification_payload(notif)` maps a `Notification` to the SSE JSON body.
+- **`core/notification_publisher.py`** — `publish_notification(...)` — best-effort Redis pub/sub publish to channel `notifications:events` (worker→API bridge, swallows errors).
+- **`core/sse_relay.py`** — `notification_relay()` — an async Redis subscriber started at app **startup** (`main.py`). On a worker-published event it persists the notification (in a threadbroker) and dispatches via `sse_manager`, so worker events reach live SSE clients.
+  - **Fix (important):** the relay task must be held by a **strong reference** (`_relay_task` module var in `main.py`). Without it the asyncio task was garbage-collected shortly after startup, silently killing the subscription — worker-published notifications stopped being persisted/delivered. A `@app.on_event("shutdown")` cancels it cleanly.
+- **Endpoints** — `notifications.py` (`GET /stream` SSE text/event-stream, auth via `token` query param because `EventSource` can't send an Authorization header; `GET /` paginated; `GET /unread-count`; `PATCH /{id}/read`; `PATCH /read-all` 204) and `join_requests.py` (`POST /events/{id}/join-request` 201, `GET /events/{id}/join-requests` owner-only, `PATCH .../approve`, `PATCH .../deny`). Both wired in `api/v1/api.py`; DI factories in `api/deps.py`.
+- **Matching integration** — `matching_service.match_photo` now returns `set[str]` (matched attendee user ids); `workers/photo_worker.py` publishes a `photo_matched` notification per matched user (excluding the uploader).
+- **`schemas/event.py`** — `EventDetailResponse` gained `is_owner: bool = False`; `GET /events/{id}` sets it so the UI can show owner-only controls.
+
+### Frontend
+
+- **`lib/api.ts`** — types + functions: `requestToJoin`, `listPendingRequests`, `approveRequest`, `denyRequest`, `getNotifications`, `getUnreadCount`, `markNotificationRead`, `markAllNotificationsRead`, `EventDetailResponse.is_owner`; `request()` now returns `undefined` on a 204 (needed so `markAllNotificationsRead`/read-all don't stringify a body).
+- **`lib/notifications.ts`** — `useNotifications()` hook (initial snapshot + unread count, `EventSource` SSE live stream with auto-reconnect, optimistic `markRead`/`markAllRead`).
+- **`components/NotificationBell.tsx`** — bell with unread badge + dropdown (10 recent, navigate+n=read on click, mark-all-read, "View all" link). Added to the dashboard header.
+- **`components/NotificationsPage.tsx` + `app/notifications/page.tsx`** — full page, All/Unread filter, mark-all-read, paginated.
+- **`components/EventsView.tsx`** — search results now show a "Request to join" button (and pending state) instead of the "coming soon" note.
+- **`app/events/[id]/page.tsx`** — owner-only "Join requests" section with Approve/Deny, loaded when `ev.is_owner`.
+
+### Attendee backfill — match existing photos when someone joins
+
+**Situation fixed:** photos are matched exactly once, at upload time, against whichever attendees exist *then*. A user who joins (share link) or is approved (join request) after photos already exist never got those matches.
+
+**Fix:** when a user **newly** becomes an attendee, backfill matching runs them against the event's already-stored faces:
+
+- `EventFaceRepository.get_faces_for_event(event_id)` — scrolls `event_faces` by payload `event_id`, returning `(photo_id, FaceEmbedding)` pairs (shared `_scroll_faces` helper refactored out of `get_faces_for_photo`).
+- `MatchingService.match_new_attendee(event_id, user_id)` — if the user has a profile, iterates every stored event face, runs the same restricted `user_profiles` similarity search (`query_similar_restricted` filtered to just that user, above threshold), and `upsert_best`s a `PhotoMatch` per (photo, user). Returns the matched photo id set. Skips users with no profile.
+- `NotificationService.create_match_notifications(...)` — notifies the new attendee per matched photo with the same `photo_matched` payload the worker emits for upload-time matches (title "New match found!", subject `event`).
+- Wired into **both** entry points, gated on `added` (idempotent `add_attendee` → only genuinely-new attendees): `EventService.join` (share link) and `JoinRequestService.approve` (join request). Both wrap it in try/except — a Qdrant hiccup must never break join/approve.
+- No uploader-skip needed: uploading already requires membership (`PhotoService._ensure_member`), so a newly-added attendee can never be the uploader of any pre-existing photo.
+
+### Verified (rebuilt `app` + `worker`)
+
+- ✅ Migration applies + rolls back cleanly (downgrade → re-upgrade).
+- ✅ Join-request flow: request (201) → dup (409) → owner lists pending → ok → non-owner list (403) → approve → requester is now an attendee (can view event) → requester gets `join_approved`, owner got `join_request`.
+- ✅ Deny flow: second requester → owner denies → requester gets `join_denied` and **cannot** access the event (403).
+- ✅ Notification read lifecycle: unread count, `PATCH /{id}/read`, `PATCH /read-all` (204), count back to 0.
+- ✅ **SSE real-time:** opening the owner's `/notifications/stream` and triggering a join request delivered the `join_request` event live (event name `notification`), and a **match event delivered via the worker→Redis→relay path** over a live SSE stream (payload intact).
+- ✅ **Worker match notifications:** uploading a face photo to an event as a member → worker matched an attendee → that attendee received a persisted `photo_matched` notification (subject `event`) — after the relay-strong-reference fix.
+- ✅ **Attendee backfill:** with a processed existing photo in the event, (a) a new user joining via **share link** immediately got a `PhotoMatch` row (visible in `/matches/me`) and a `photo_matched` notification; (b) a requester **approved** by the owner got the same; (c) a user with **no face profile** joined with no error and no matches; (d) **rejoining** was idempotent (no duplicate notifications). (14/14 automated checks passed.)
+- ✅ Frontend `eslint` (only the pre-existing `RequireAuth`/`FaceScan` issues) and `npm run build` pass (includes the `/notifications` route).
+
+### Notes / issues hit
+
+- **SSE payload corruption:** the initial `event_stream` did `data: {payload}\n\n` with a dict — the f-string rendered it with single quotes (invalid JSON on the wire). Fixed by `json.dumps(payload)` in the SSE yield.
+- **EventSource auth:** the stream endpoint accepts `token` as a query param (fresh `_user_from_header_or_token` dependency resolves Authorization header first, then query token) because the browser EventSource API cannot set headers.
+- The worker container's long-idle Redis connection can time out; `main()` already reconnects (Phase 5 fix) — that is unchanged here.
+- SSEManager holds one `asyncio.Queue` per live client; keepalive comments go out every 15 s so proxies/browsers don't drop the idle connection.
+
 ## ✅ Phase 3 — Events
 
 **Goal:** Users can create an event with a shareable link; opening that link while active marks you an attendee.

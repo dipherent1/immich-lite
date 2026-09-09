@@ -10,6 +10,15 @@ from app.schemas.event import (
     EventPublicResponse,
     EventResponse,
 )
+from app.schemas.join_request import (
+    JoinRequestActionResponse,
+    JoinRequestResponse,
+)
+from app.schemas.notification import (
+    NotificationListResponse,
+    NotificationResponse,
+    UnreadCountResponse,
+)
 from app.schemas.user import UserResponse
 
 __all__ = [
@@ -22,4 +31,9 @@ __all__ = [
     "EventPublicResponse",
     "EventDetailResponse",
     "EventJoinResponse",
+    "JoinRequestResponse",
+    "JoinRequestActionResponse",
+    "NotificationResponse",
+    "NotificationListResponse",
+    "UnreadCountResponse",
 ]
