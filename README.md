@@ -1,223 +1,158 @@
-# Immich Lite — Face Matching Microservice
+# Immich Lite
 
-A lightweight, standalone Python microservice for face embedding extraction and similarity matching, extracted from the main [Immich](https://github.com/immich-app/immich) machine-learning service. It uses the same **insightface** backend (ArcFace + RetinaFace) to keep embeddings compatible with the full Immich pipeline.
+A self-hosted face-matching service for photo events. Users enroll a face profile,
+create or join events via share links / owner-approved join requests, upload photos,
+and get matched photos (who's in the shot) delivered to them through an in-app feed
+and live SSE notifications.
 
-The project is being rebuilt around a phased plan (see [PHASES.md](PHASES.md)). **Phase 0 (repo restructure) is complete.** The code has been relocated into the new `src/app/...` layout without changing behavior.
+Built on the same **InsightFace** backend (RetinaFace detection + ArcFace embeddings)
+the full [Immich](https://github.com/immich-app/immich) project uses, so vectors stay
+compatible with the broader Immich ecosystem.
 
-## Status
-
-| Phase | Description                          | Status  |
-| ----- | ------------------------------------ | ------- |
-| 0     | Repo restructure, no behavior change | ✅ Done |
-| 1     | Accounts & Auth                      | ⬜ Todo |
-| 2     | Face Profile Enrollment              | ⬜ Todo |
-| 3     | Events                               | ⬜ Todo |
-| 4     | Photo Ingestion Pipeline             | ⬜ Todo |
-| 5     | Matching & Delivery                  | ⬜ Todo |
-| 6     | Notifications (optional)             | ⬜ Todo |
-| 7     | Hardening & Ops                      | ⬜ Todo |
-
-See [PROGRESS.md](PROGRESS.md) for what's done and [TODO.md](TODO.md) for what's next.
-
-## Phase 0 — Architecture (current)
-
-The codebase now has two layers:
-
-- **`src/app/`** — the new canonical application:
-  - `main.py` — FastAPI app with `/ping` health check
-  - `api/v1/api.py` — the API router (empty so far; sub-routers like auth/users/events land here in later phases)
-  - `core/` — `config.py` (Pydantic settings), `database.py` (SQLModel/Postgres engine + session + `Base`), `vector_db.py` (Qdrant client)
-  - `services/` — `embedding_service.py` (InsightFace + ArcFace + RetinaFace)
-  - `domain/` — entities + interfaces (moved from the old package)
-  - `models/`, `schemas/`, `workers/` — empty placeholders for later phases
-- **`lite_ml_service/`** — the **legacy** package. It is superseded but still importable: its modules re-export from the relocated `src/app` code so the old CLI scripts (`run_indexer.py`, `run_api.py`) keep working. Do not add new code here.
+## Architecture
 
 ```
 immich-lite/
-├── src/app/                     # canonical app
-│   ├── main.py                  # FastAPI + /ping
-│   ├── api/v1/api.py            # router (empty in Phase 0)
-│   ├── core/{config,database,vector_db}.py
-│   ├── services/embedding_service.py
-│   ├── domain/{entities,interfaces}.py
-│   └── models/, schemas/, workers/
-├── lite_ml_service/             # legacy (re-exports from src/app)
-├── migrations/                  # Alembic migrations (env.py wired to app Base)
-├── alembic.ini                  # Alembic config
-├── docker-compose.yml           # Qdrant + PostgreSQL + app
-├── Dockerfile
-├── run_indexer.py / run_api.py  # legacy CLI entry points
-├── config.yml                   # legacy config
-└── output/                      # legacy match output
+├── backend/            # FastAPI app (backend/src/app) + Alembic migrations + RQ worker + tests
+├── frontend/           # Next.js 16 (App Router, TypeScript) — single API client in src/lib/api.ts
+├── monitoring/         # Prometheus, Grafana, Alertmanager configs + dashboard
+├── legacy/             # Archived pre-rewrite code (see legacy/README.md — do not use)
+├── docs/               # Phase plan, progress/changelog, testing & logging guides
+└── docker-compose.yml  # Full stack: qdrant, postgres, redis, app, worker, monitoring
 ```
 
-## Requirements
+### Data flow
 
-- Python 3.11
-- [Docker](https://docs.docker.com/engine/install/) and Docker Compose
-- ~16 MB disk for the ONNX model (downloaded automatically from HuggingFace)
+```
+Photo upload (API) → Photo row (Postgres, status=pending) → RQ job (Redis)
+  → photo_worker: detect faces → face embeddings → event_faces (Qdrant)
+  → match vs attendee user_profiles (Qdrant, attendee-scoped filter)
+  → PhotoMatch rows (Postgres) → notification per matched user → SSE live push
+```
 
-## Quick Start (Docker)
+Two stores, two roles:
+
+- **Postgres** — users, events, attendees, photos, matches, join requests, notifications.
+- **Qdrant** — vectors only: `user_profiles` (one point per user) and `event_faces`
+  (one point per detected face, payload-carried `event_id`/`photo_id`/`bbox`).
+
+### Status
+
+Phases 0–6 are complete (accounts/auth, face-profile enrollment, events, ingestion
+pipeline with an RQ worker, attendee-scoped matching + feed, notifications/join
+requests). Observability (structured JSON logs with correlation ids, Prometheus
+metrics, Grafana dashboards, alert rules) is also in place. See `docs/PROGRESS.md`
+for the full changelog and `docs/PHASES.md` for the roadmap.
+
+## Quick start (Docker)
 
 ```bash
 docker compose up -d
 ```
 
-### Update the code only
+This starts Qdrant (`:8090`), Postgres (`:5433`), Redis, the API (`:8080`), the RQ
+worker, and the monitoring stack (Prometheus `:9090`, Grafana `:3001`, Alertmanager
+`:9093`, RQ dashboard `:9181`).
+
+Rebuild after code changes:
 
 ```bash
-docker compose up -d --build app
+docker compose up -d --build app worker
 ```
 
-### To see the logs
+> **Host ports:** on Windows, reserved TCP ranges block `6333`/`8000`, so the compose
+> file maps services to `8090`/`8100`/`8080`. Container ports are unchanged.
 
-```bash
-docker logs -f immich-lite-app
-```
+## Local development
 
-This starts:
-
-- **Qdrant** vector database (host ports `8090` REST / `8100` gRPC)
-- **PostgreSQL** (host port `5433`)
-- **Immich Lite** API server on host port `8080` (maps to the container's 8000)
-
-> Note on this machine: Windows reserves TCP port ranges (e.g. `6267–6366`,
-> `7906–8005`) that block binding to `6333`/`6334` and `8000`. The compose file maps
-> to host ports outside those ranges (`8090`/`8100`/`8080`). The container ports are
-> unchanged — only the host-facing bindings differ. Verify a port is free with
-> `python -c "import socket; socket.socket().bind(('0.0.0.0', PORT))"`.
-
-## Local Development Setup
-
-### 1. Install dependencies
+Backend (Python 3.11):
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+
+# backing services only (no build)
+docker compose up -d qdrant postgres redis
+
+# run the API from backend/
+cd backend
+$env:PYTHONPATH="src"; uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
 
-For the new `src/app` layer, also install the relational/migration stack (included in the requirements above):
+Frontend (Node 24 / npm):
 
 ```bash
-pip install sqlalchemy sqlmodel alembic pydantic-settings psycopg2-binary
+cd frontend
+npm install
+npm run dev        # http://localhost:3000, talks to :8080 via NEXT_PUBLIC_API_URL
 ```
 
-### 2. Start the backing services
+CORS is enabled for `http://localhost:3000` by default (`CORS_ORIGINS` setting).
+
+### Environment
+
+Copy `.env.example` to `.env` and set at least `JWT_SECRET`. Settings are read from
+`.env` (loaded from the repo root regardless of CWD) via
+`backend/src/app/core/config.py`.
+
+## Database migrations
+
+Alembic owns every schema change — never rely on ORM auto-create. Migrations live in
+`backend/migrations/`; run them from `backend/`:
 
 ```bash
-docker compose up -d qdrant postgres
-```
-
-### 3. Configure environment (`.env`)
-
-```env
-QDRANT_URL=http://localhost:8090
-DATABASE_URL=postgresql+psycopg2://immich:immich@localhost:5433/immich_lite
-```
-
-Settings are read from `.env` by `src/app/core/config.py` (Pydantic settings). Override any field with the matching env var.
-
-### 4. Run the new API server
-
-```bash
-# from the project root
-PYTHONPATH=src uvicorn app.main:app --host 0.0.0.0 --port 8080
-uvicorn app.main:app --host 0.0.0.0 --port 8080   # (if running from src/)
-```
-
-Health check:
-
-```bash
-curl http://localhost:8080/ping
-# {"message":"pong"}
-```
-
-## Database Migrations (Alembic)
-
-Alembic owns every schema change — never rely on `Base.metadata.create_all()` for the app DB.
-
-```bash
-# Apply all migrations (Phase 0 ships no tables yet; proves wiring + creates alembic_version)
-alembic upgrade head
-
-# Preview the SQL Alembic would emit
-alembic upgrade head --sql
-
-# Roll back one step
-alembic downgrade -1
-
-# Generate a migration from model changes
+cd backend
+alembic upgrade head          # apply
+alembic downgrade -1          # roll back one step
 alembic revision --autogenerate -m "describe change"
 ```
 
-`migrations/env.py` is wired to `app.core.database.Base` and reads the DB URL from the app settings.
+Tip: on the current Postgres setup the DB isn't exposed on a host port, so apply
+migrations inside the app container: `docker compose exec app alembic upgrade head`.
 
-## API Endpoints
+## API surface (all under `/api/v1`)
 
-| Method | Path    | Description  |
-| ------ | ------- | ------------ |
-| GET    | `/ping` | Health check |
+| Area | Endpoints |
+|---|---|
+| Auth | `POST /auth/register`, `POST /auth/login` |
+| Users | `GET /users/me`, `POST /users/me/scan` (face profile, 1–3 images) |
+| Events | `POST /events`, `GET /events`, `GET /events/search`, `GET /events/join/{token}`, `GET /events/{id}`, `POST /events/{id}/photos`, `GET /events/{id}/photos`, `GET /events/{id}/photos/{pid}/file` |
+| Join requests | `POST /events/{id}/join-request`, `GET /events/{id}/join-requests`, `PATCH .../approve`, `PATCH .../deny` |
+| Matches | `GET /matches/me` (matched-photo feed) |
+| Notifications | `GET /notifications`, `GET /notifications/unread-count`, `GET /notifications/stream` (SSE), `PATCH /notifications/{id}/read`, `PATCH /notifications/read-all` |
+| Misc | `GET /ping`, `GET /metrics` (Prometheus) |
 
-(Routes for auth, users, events, photos, and matches are added in later phases under `/api/v1/...`.)
+Interactive docs: `http://localhost:8080/docs`.
 
-## Model
+## Testing
 
-Uses **insightface** model zoo with ONNX Runtime. The default model is `buffalo_l` (configurable via `MODEL_NAME` in `config.yml` / `model_name` setting):
-
-- **RetinaFace** for face detection (ONNX)
-- **ArcFace** (W600K-R50) for 512-dimensional face embeddings
-
-**Supported image formats:** JPG, PNG, WebP, BMP, HEIC, HEIF, TIFF, GIF, AVIF
-
-Models are downloaded automatically on first use from HuggingFace (`immich-app/buffalo_l`) to `~/.cache/immich_ml/buffalo_l/`.
-
----
-
-## Legacy CLI (superseded, still works)
-
-The original indexer/matcher workflow is being replaced. It is kept functional for reference and can be removed once the new phases cover it. It lives in `lite_ml_service/` and is still importable via `run_indexer.py` / `run_api.py`.
-
-### Index faces
+191 tests (unit + repository + integration), ~89% line coverage:
 
 ```bash
-python run_indexer.py                      # index all dirs from config.yml
-python run_indexer.py C:\some\photos       # index a specific directory
-python run_indexer.py --add C:\new_photos  # additive mode
+cd backend
+python -m pytest
+python -m pytest --cov=app --cov-report=term-missing
 ```
 
-### Run the legacy API
+See `docs/TESTING.md` for the full breakdown.
 
-```bash
-python run_api.py
-```
+## Observability
 
-### Legacy endpoints
+- **Logs** — structured JSON (one object per line) with correlation ids so a single
+  upload can be traced API → queue → worker. See `docs/LOGGING.md`.
+- **Metrics** — Prometheus endpoint on the API (`:8080/metrics`) and the worker
+  (`:9100`, internal), with alert rules that catch a dead worker / stalled queue.
+- **Dashboards** — Grafana on `:3001` (login `admin`/`admin`), "Immich Lite" dashboard
+  auto-provisioned from `monitoring/grafana/`.
 
-| Method | Path                   | Description                                           |
-| ------ | ---------------------- | ----------------------------------------------------- |
-| GET    | `/`                    | Service info                                          |
-| GET    | `/ping`                | Health check                                          |
-| GET    | `/scan`                | Webcam capture UI                                     |
-| POST   | `/api/match`           | Match face(s) via uploaded images (up to 3, centroid) |
-| POST   | `/api/match-by-path`   | Match face(s) via server-side file/directory paths    |
-| GET    | `/api/download/{name}` | Download matched images as zip                        |
+## Notes
 
-### Legacy config (`config.yml`)
-
-```yaml
-model_name: buffalo_l
-output_root: output
-qdrant_collection_name: face_embeddings
-
-image_paths:
-  - "C:\\Users\\SHO\\Pictures\\D-days\\50-days"
-  # ...
-```
-
-## Extending
-
-- **Storage**: implement `EmbeddingRepository` (`save_all`, `upsert_batch`, `delete_by_dir`, `find_similar`)
-- **Multi-face centroid**: upload multiple images — embeddings are averaged into a centroid for more robust matching
-- **Model**: set `model_name: buffalo_s` in `config.yml` for faster but less accurate inference
-- **Embedding backend**: implement `EmbeddingProvider` to swap in a different model
+- Memory model: photos are stored once under `output/photos/{event}/{photo}.jpg`
+  (bind-mounted `./output:/app/output`) and referenced everywhere by relative path —
+  nothing is copied for matching or delivery.
+- The frontend's auth is a JWT in `localStorage` via `frontend/src/lib/api.ts`; that
+  single module is the seam for moving to HttpOnly-cookie auth behind a Next.js proxy.
+- Qdrant has no foreign keys — points are soft-linked to Postgres via payload ids and
+  are orphaned if a `Photo`/`Event` row is deleted without explicit cleanup (tracked
+  as a hardening task in `docs/PHASES.md`).

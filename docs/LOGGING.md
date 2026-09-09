@@ -11,6 +11,10 @@ queue and the worker, and they are shaped so a log aggregator (Loki / ELK /
 CloudWatch) can ingest them with **zero reformatting**. A human‑readable console
 format is kept for local / container-journal dev.
 
+> **Paths:** all paths below are relative to the `backend/` directory (e.g. file
+> source is `backend/src/app/core/logging.py`, log output resolves to
+> `backend/logs/app.log` locally / `/app/logs/app.log` in the container).
+
 ---
 
 ## 1. The three pillars (why this file exists)

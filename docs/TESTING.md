@@ -12,7 +12,11 @@ python -m pytest tests/integration -v                      # integration tests o
 python -m pytest -k "join" -v                              # tests matching a keyword
 ```
 
-**Current state:** 191 tests, all passing, ~36s runtime, 89% line coverage.
+**Current state:** 206 tests (131 unit · 39 repository · 36 integration), all passing, ~35s runtime, **80% line coverage**. Total coverage dropped from the ~89% documented earlier because the Phase 6 code added ~600 lines of notification/SSE/join-request surface (`core/sse.py`, `core/sse_relay.py`, `repositories/join_request_repository.py`, `repositories/notification_repository.py`, `notification_service.py`, `join_request_service.py`) that has no dedicated unit tests yet — the pre-Phase-6 modules remain at 90%+ as listed below.
+
+> **Paths:** all paths below are relative to the `backend/` directory. Run the
+> test commands from `backend/` (`pytest` resolves `testpaths`/`pythonpath` from
+> `backend/pyproject.toml`).
 
 | Scope | Line coverage |
 |---|---|
@@ -25,7 +29,7 @@ python -m pytest -k "join" -v                              # tests matching a ke
 | `api/deps.py` | 89% |
 | `api/v1/endpoints/*` | auth 100% · events 100% · matches 100% · users 95% |
 | Schemas (DTO validation) | ~100% |
-| **Total (all `app/`)** | **89%** — remaining gaps: `embedding_service.py` (legacy GPU model wrapper, intentionally untested), `workers/` (excluded from coverage), `core/metrics.py` 52%, `core/middleware.py` 87% |
+| **Total (all `app/`)** | **80%** — remaining gaps: `embedding_service.py` (legacy GPU model wrapper, intentionally untested) 16%, `workers/` (excluded from coverage), Phase 6 notifiers: `sse.py` 0% · `sse_relay.py` 33% · `notification_repository.py` 33% · `join_request_repository.py` 34% · `notification_service.py` 48% · `join_request_service.py` 70% · `core/metrics.py` 52% · `core/middleware.py` 87% |
 
 ---
 
