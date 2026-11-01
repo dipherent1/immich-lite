@@ -51,10 +51,13 @@ class EventService:
         # The events columns are `timestamp without time zone` (naive). The app
         # stores UTC wall-clock values, so compare everything in naive UTC.
         now = cls._naive_utc(now or datetime.now(timezone.utc))
-        if now < event.starts_at:
+        starts_at = cls._naive_utc(event.starts_at)
+        if now < starts_at:
             return False
-        if event.expires_at is not None and now > event.expires_at:
-            return False
+        if event.expires_at is not None:
+            expires_at = cls._naive_utc(event.expires_at)
+            if now > expires_at:
+                return False
         return True
 
     def generate_join_token(self) -> str:

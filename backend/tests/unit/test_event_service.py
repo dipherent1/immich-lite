@@ -69,6 +69,14 @@ def test_is_active_naive_event_fields_tz_aware_now(make_event):
     assert EventService.is_active(event, now=now)
 
 
+def test_is_active_tz_aware_event_fields(make_event):
+    # When DB returns tz-aware datetimes, is_active must normalize both sides.
+    now = _now()
+    event = make_event(starts_at=now - timedelta(hours=1), expires_at=now + timedelta(hours=1))
+    assert EventService.is_active(event, now=now)
+    assert EventService.is_active(event, now=_naive(now))
+
+
 def test_is_active_naive_default_now(make_event):
     event = make_event()  # active relative to the current instant
     assert EventService.is_active(event)
