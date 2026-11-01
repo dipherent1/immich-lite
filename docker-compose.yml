@@ -21,7 +21,7 @@ services:
     volumes:
       - postgres_storage:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U immich -d immich_lite"]
+      test: [ "CMD-SHELL", "pg_isready -U immich -d immich_lite" ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -39,7 +39,7 @@ services:
     volumes:
       - rabbitmq_storage:/var/lib/rabbitmq
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test: [ "CMD", "rabbitmq-diagnostics", "-q", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -48,7 +48,7 @@ services:
   flower:
     build: ./backend
     container_name: immich-lite-flower
-    command: ["celery", "-A", "app.core.celery_app", "flower", "--port=5555", "--persistent=True", "--db=/data/flower.db"]
+    command: [ "celery", "-A", "app.core.celery_app", "flower", "--port=5555", "--persistent=True", "--db=/data/flower.db" ]
     ports:
       - "5555:5555"
     environment:
@@ -139,6 +139,25 @@ services:
       - prometheus
     restart: unless-stopped
 
+  # --- Admin / Ops & container monitoring ---
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: immich-lite-dozzle
+    ports:
+      - "${DOZZLE_PORT:-8889}:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  beszel:
+    image: henrygd/beszel:latest
+    container_name: immich-lite-beszel
+    ports:
+      - "${BESZEL_PORT:-8890}:8090"
+    volumes:
+      - beszel_data:/beszel_data
+    restart: unless-stopped
+
   app:
     build: ./backend
     container_name: immich-lite-app
@@ -165,7 +184,7 @@ services:
   worker:
     build: ./backend
     container_name: immich-lite-worker
-    command: ["python", "-m", "app.workers.photo_worker"]
+    command: [ "python", "-m", "app.workers.photo_worker" ]
     volumes:
       - ./output:/app/output
       - immich_ml_cache:/root/.cache/immich_ml
@@ -185,6 +204,20 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+    container_name: immich-lite-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+    depends_on:
+      - app
+    restart: unless-stopped
+
 volumes:
   qdrant_storage:
   postgres_storage:
@@ -193,3 +226,4 @@ volumes:
   immich_ml_cache:
   prometheus_data:
   grafana_data:
+  beszel_data:
