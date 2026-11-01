@@ -20,11 +20,14 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg2://immich:immich@localhost:5433/immich_lite"
 
-    qdrant_url: str = "http://localhost:8090"
+    qdrant_url: str = "http://localhost:8190"
     qdrant_api_key: str | None = None
     qdrant_collection_name: str = "face_embeddings"
 
-    redis_url: str = "redis://localhost:6379/0"
+    # AMQP broker for Celery (job queue) and the worker→API notification exchange.
+    # `%2F` is the `/` vhost, spelled explicitly so pika, kombu and aio-pika
+    # all parse it the same way (pika treats a bare `//` as an empty vhost).
+    rabbitmq_url: str = "amqp://immich:immich@localhost:5672/%2F"
 
     model_name: str = "buffalo_l"
     detection_threshold: float = 0.5

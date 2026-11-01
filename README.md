@@ -13,18 +13,18 @@ compatible with the broader Immich ecosystem.
 
 ```
 immich-lite/
-├── backend/            # FastAPI app (backend/src/app) + Alembic migrations + RQ worker + tests
+├── backend/            # FastAPI app (backend/src/app) + Alembic migrations + Celery worker + tests
 ├── frontend/           # Next.js 16 (App Router, TypeScript) — single API client in src/lib/api.ts
 ├── monitoring/         # Prometheus, Grafana, Alertmanager configs + dashboard
 ├── legacy/             # Archived pre-rewrite code (see legacy/README.md — do not use)
 ├── docs/               # Phase plan, progress/changelog, testing & logging guides
-└── docker-compose.yml  # Full stack: qdrant, postgres, redis, app, worker, monitoring
+└── docker-compose.yml  # Full stack: qdrant, postgres, rabbitmq, app, worker, monitoring
 ```
 
 ### Data flow
 
 ```
-Photo upload (API) → Photo row (Postgres, status=pending) → RQ job (Redis)
+Photo upload (API) → Photo row (Postgres, status=pending) → Celery job (RabbitMQ)
   → photo_worker: detect faces → face embeddings → event_faces (Qdrant)
   → match vs attendee user_profiles (Qdrant, attendee-scoped filter)
   → PhotoMatch rows (Postgres) → notification per matched user → SSE live push
@@ -39,7 +39,7 @@ Two stores, two roles:
 ### Status
 
 Phases 0–6 are complete (accounts/auth, face-profile enrollment, events, ingestion
-pipeline with an RQ worker, attendee-scoped matching + feed, notifications/join
+pipeline with a Celery worker, attendee-scoped matching + feed, notifications/join
 requests). Observability (structured JSON logs with correlation ids, Prometheus
 metrics, Grafana dashboards, alert rules) is also in place. See `docs/PROGRESS.md`
 for the full changelog and `docs/PHASES.md` for the roadmap.
@@ -50,9 +50,9 @@ for the full changelog and `docs/PHASES.md` for the roadmap.
 docker compose up -d
 ```
 
-This starts Qdrant (`:8090`), Postgres (`:5433`), Redis, the API (`:8080`), the RQ
-worker, and the monitoring stack (Prometheus `:9090`, Grafana `:3001`, Alertmanager
-`:9093`, RQ dashboard `:9181`).
+This starts Qdrant (`:8190`), Postgres (`:5433`), RabbitMQ (`:5672`, management UI
+`:15672`), the API (`:8080`), the Celery worker, and the monitoring stack
+(Prometheus `:9090`, Grafana `:3001`, Alertmanager `:9093`, Flower `:5555`).
 
 Rebuild after code changes:
 
@@ -60,8 +60,8 @@ Rebuild after code changes:
 docker compose up -d --build app worker
 ```
 
-> **Host ports:** on Windows, reserved TCP ranges block `6333`/`8000`, so the compose
-> file maps services to `8090`/`8100`/`8080`. Container ports are unchanged.
+> **Host ports:** on Windows, reserved TCP ranges can block `6333`/`8000`, so the compose
+> file maps services to `8190`/`8191`/`8080`. Container ports are unchanged.
 
 ## Local development
 
@@ -73,7 +73,7 @@ python -m venv .venv
 pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 
 # backing services only (no build)
-docker compose up -d qdrant postgres redis
+docker compose up -d qdrant postgres rabbitmq
 
 # run the API from backend/
 cd backend

@@ -1,14 +1,14 @@
 """Server-Sent Events (SSE) connection manager.
 
 The API process keeps one module-level `sse_manager`. Each connected browser
-registers a per-user queue via `connect(user_id)`; a Redis pub/sub listener
+registers a per-user queue via `connect(user_id)`; a RabbitMQ consumer
 (started in `main.py`) calls `dispatch(user_id, data)` whenever a notification
 event was published for that user, which fans the payload out to every live
 connection for that user.
 
-The worker process never talks to browsers directly — it only publishes to
-Redis. The API server is the single SSE gateway, so a single broadcast touchpoint
-(Redis) keeps the two process models decoupled.
+The worker process never talks to browsers directly — it only publishes to the
+RabbitMQ notification exchange. The API server is the single SSE gateway, so a
+single broker touchpoint keeps the two process models decoupled.
 """
 
 from __future__ import annotations

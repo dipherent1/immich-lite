@@ -8,7 +8,7 @@ Logs are structured JSON, one object per line, so they are machine-parseable
 in production (Loki/ELK/CloudWatch) instead of free-form text. In addition a
 set of "correlation" context variables (request_id, job_id, user_id) is
 attached to every record that shares a context, so a single upload can be
-traced end-to-end across the API, the RQ queue and the worker.
+traced end-to-end across the API, the Celery queue and the worker.
 """
 
 from __future__ import annotations

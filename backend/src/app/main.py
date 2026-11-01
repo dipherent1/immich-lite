@@ -15,7 +15,6 @@ from fastapi.responses import JSONResponse, Response
 from app.api.v1.api import api_router
 from app.core.config import get_settings
 from app.core.logging import setup_logging
-from app.core.metrics import refresh_rq_metrics
 from app.core.middleware import RequestLoggingMiddleware
 
 logger = setup_logging()
@@ -45,8 +44,8 @@ _relay_task = None
 
 @app.on_event("startup")
 async def start_notification_relay() -> None:
-    """Start the Redis pub/sub -> SSE relay as a background task so worker-
-    published notifications reach connected browsers."""
+    """Start the RabbitMQ -> SSE relay as a background task so worker-published
+    notifications reach connected browsers."""
     global _relay_task
     if _relay_task is not None and not _relay_task.done():
         return
@@ -60,6 +59,10 @@ async def stop_notification_relay() -> None:
     global _relay_task
     if _relay_task is not None:
         _relay_task.cancel()
+        try:
+            await _relay_task
+        except asyncio.CancelledError:
+            pass
         _relay_task = None
 
 
@@ -87,10 +90,9 @@ async def ping() -> dict[str, str]:
 
 @app.get("/metrics", include_in_schema=False)
 async def metrics() -> Response:
-    """Prometheus scrape endpoint: refresh live RQ queue depth, then return all
-    metrics in text exposition format. Deliberately unauthenticated so Prometheus
-    can scrape it; it exposes no user data."""
-    refresh_rq_metrics(get_settings().redis_url)
+    """Prometheus scrape endpoint: return all app metrics in text exposition
+    format. Deliberately unauthenticated so Prometheus can scrape it; it exposes
+    no user data. RabbitMQ queue metrics come from the separate exporter."""
     from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
     return Response(

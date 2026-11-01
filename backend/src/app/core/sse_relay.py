@@ -1,12 +1,13 @@
-"""Redis pub/sub → SSE relay for the API process.
+"""RabbitMQ → SSE relay for the API process.
 
 Notifications can be produced in two places:
   - In-process (API): join-request/approval/denial services call
     `NotificationService.create`, which persists a row and dispatches directly
     to the user's live SSE connection.
-  - The worker process (photo matched): it publishes a raw event to Redis.
-    This background listener subscribes to that channel, persists a Notification
-    row (its own DB session), and relays it to the user's live SSE connection.
+  - The worker process (photo matched): it publishes a raw event to a RabbitMQ
+    fanout exchange. This background listener binds its own exclusive queue to
+    that exchange, persists a Notification row (its own DB session), and relays
+    it to the user's live SSE connection.
 
 Either way the source of truth is the Postgres row; the live push is an
 optimization. The listener is started in `main.py`.
@@ -19,45 +20,60 @@ import json
 import logging
 
 from app.core.config import get_settings
-from app.core.notification_publisher import EVENTS_CHANNEL
+from app.core.notification_publisher import EVENTS_EXCHANGE
 
 logger = logging.getLogger("app.notifications.sse")
 
 
 async def notification_relay() -> None:
-    """Subscribe to the notifications channel and relay each event to the
+    """Subscribe to the notification exchange and relay each event to the
     relevant user's SSE connections. Never raises out: on any transient error it
     logs and reconnects so the gateway stays alive."""
     try:
-        import redis.asyncio as aioredis
+        import aio_pika
     except ImportError:
-        logger.warning("redis.asyncio unavailable; notification SSE relay disabled")
+        logger.warning("aio-pika unavailable; notification SSE relay disabled")
         return
 
     while True:
+        connection = None
         try:
-            conn = aioredis.from_url(
-                get_settings().redis_url,
-                socket_keepalive=True,
-                socket_timeout=None,
-                socket_connect_timeout=10,
+            # Non-robust connect + our own retry loop: `connect_robust` returns
+            # immediately and blocks `channel()` forever while the broker is
+            # down, which also makes shutdown/cancellation hang.
+            connection = await aio_pika.connect(
+                get_settings().rabbitmq_url, timeout=10
             )
-            pubsub = conn.pubsub()
-            await pubsub.subscribe(EVENTS_CHANNEL)
-            logger.info("notification SSE relay subscribed to %s", EVENTS_CHANNEL)
-            async for message in pubsub.listen():
-                if message.get("type") != "message":
-                    continue
-                try:
-                    payload = json.loads(message["data"])
-                    _handle_event(payload)
-                except Exception:
-                    logger.exception("failed to relay notification event")
-            await pubsub.close()
-            await conn.aclose()
+            channel = await connection.channel()
+            exchange = await channel.declare_exchange(
+                EVENTS_EXCHANGE,
+                aio_pika.ExchangeType.FANOUT,
+                durable=True,
+            )
+            # Exclusive/auto-delete queue: every API instance gets its own copy
+            # of every event (fanout) and the queue disappears when it stops.
+            queue = await channel.declare_queue(exclusive=True, auto_delete=True)
+            await queue.bind(exchange)
+            logger.info("notification SSE relay subscribed to %s", EVENTS_EXCHANGE)
+            async with queue.iterator() as messages:
+                async for message in messages:
+                    async with message.process():
+                        try:
+                            payload = json.loads(message.body)
+                            _handle_event(payload)
+                        except Exception:
+                            logger.exception("failed to relay notification event")
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.exception("notification SSE relay error; reconnecting in 5s")
             await asyncio.sleep(5)
+        finally:
+            if connection is not None:
+                try:
+                    await connection.close()
+                except Exception:
+                    logger.debug("failed to close relay connection", exc_info=True)
 
 
 def _handle_event(payload: dict) -> None:

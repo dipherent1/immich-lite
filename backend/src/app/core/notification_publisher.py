@@ -1,11 +1,11 @@
-"""Publish notification events to Redis (used by the worker process).
+"""Publish notification events to RabbitMQ (used by the worker process).
 
 The worker does the heavy ingestion/matching and may live in a separate
 container from the API server. When it finds a match it publishes a
-notification event to a Redis pub/sub channel; the API server's listener
-subscribes to that channel, persists a Notification row, and relays it to the
+notification event to a RabbitMQ fanout exchange; the API server's listener
+subscribes to that exchange, persists a Notification row, and relays it to the
 requesting user's live SSE connection. This keeps the two processes decoupled —
-the worker only knows Redis, never about the browser SSE connections.
+the worker only knows RabbitMQ, never about the browser SSE connections.
 """
 
 from __future__ import annotations
@@ -17,8 +17,9 @@ from app.core.config import get_settings
 
 logger = logging.getLogger("app.notifications")
 
-# Channel the worker publishes to; the API server subscribes on the same channel.
-EVENTS_CHANNEL = "notifications:events"
+# Fanout exchange the worker publishes to; every API instance binds its own
+# (exclusive) queue so each connected browser receives the event.
+EVENTS_EXCHANGE = "notifications.events"
 
 
 def publish_notification(
@@ -30,25 +31,38 @@ def publish_notification(
     subject_type: str | None = None,
     subject_id: str | None = None,
 ) -> None:
-    """Publish a notification event to Redis. Best-effort: a Redis outage here
-    must never fail the worker job, so failures are logged, not raised."""
+    """Publish a notification event to RabbitMQ. Best-effort: a broker outage
+    here must never fail the worker job, so failures are logged, not raised."""
     try:
-        from redis import Redis
+        import pika
 
-        connection = Redis.from_url(get_settings().redis_url)
-        connection.publish(
-            EVENTS_CHANNEL,
-            json.dumps(
-                {
-                    "user_id": user_id,
-                    "type": type,
-                    "title": title,
-                    "body": body,
-                    "subject_type": subject_type,
-                    "subject_id": subject_id,
-                }
-            ),
-        )
+        params = pika.URLParameters(get_settings().rabbitmq_url)
+        params.connection_attempts = 1
+        params.socket_timeout = 10
+        params.blocked_connection_timeout = 10
+        connection = pika.BlockingConnection(params)
+        try:
+            channel = connection.channel()
+            channel.exchange_declare(
+                exchange=EVENTS_EXCHANGE, exchange_type="fanout", durable=True
+            )
+            channel.basic_publish(
+                exchange=EVENTS_EXCHANGE,
+                routing_key="",
+                body=json.dumps(
+                    {
+                        "user_id": user_id,
+                        "type": type,
+                        "title": title,
+                        "body": body,
+                        "subject_type": subject_type,
+                        "subject_id": subject_id,
+                    }
+                ).encode("utf-8"),
+                properties=pika.BasicProperties(content_type="application/json"),
+            )
+        finally:
+            connection.close()
         logger.info(
             "published notification event",
             extra={"extra_fields": {"user_id": user_id, "type": type}},

@@ -8,11 +8,11 @@ groups:
           severity: critical
         annotations:
           summary: "Face embedding worker is down"
-          description: "The RQ photo worker ({{ $labels.instance }}) has been unscrapable for 1m. New uploads are not being matched."
+          description: "The Celery photo worker ({{ $labels.instance }}) has been unscrapable for 1m. New uploads are not being matched."
 
       - alert: QueueGrowingStalled
         expr: |
-          rq_queue_depth{queue="photos"} > 5 and changes(rq_queue_depth{queue="photos"}[15m]) == 0
+          rabbitmq_queue_messages_ready{queue="photos"} > 5 and changes(rabbitmq_queue_messages_ready{queue="photos"}[15m]) == 0
         for: 5m
         labels:
           severity: warning
@@ -48,11 +48,11 @@ groups:
           summary: "Postgres exporter is down"
           description: "Postgres is not reachable for metrics."
 
-      - alert: RedisDown
-        expr: up{job="redis"} == 0
+      - alert: RabbitMQDown
+        expr: up{job="rabbitmq"} == 0 or rabbitmq_up == 0
         for: 1m
         labels:
           severity: critical
         annotations:
-          summary: "Redis exporter is down"
-          description: "Redis is not reachable for metrics."
+          summary: "RabbitMQ is unreachable"
+          description: "The RabbitMQ broker or its exporter has been down for 1m (instance {{ $labels.instance }}). Jobs and live notifications are not flowing."

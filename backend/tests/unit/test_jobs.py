@@ -6,43 +6,28 @@ import app.core.jobs as jobs_module
 
 
 class TestEnqueuePhotoProcessing:
-    def test_enqueue_success_delegates_to_rq_queue(self, monkeypatch):
+    def test_enqueue_success_delegates_to_celery_task(self, monkeypatch):
         monkeypatch.setattr("app.core.jobs.record_enqueue", MagicMock())
-        seen = {}
-        fake_connection = MagicMock()
-        redis_mock = MagicMock()
-        redis_mock.from_url.return_value = fake_connection
-        monkeypatch.setattr("redis.Redis", redis_mock)
-
-        class FakeQueue:
-            def __init__(self, name, connection=None):
-                seen["name"] = name
-                seen["connection"] = connection
-
-            def enqueue(self, fn, photo_id, job_timeout=300):
-                seen["fn"] = fn
-                seen["photo_id"] = photo_id
-                seen["job_timeout"] = job_timeout
-                return MagicMock(id="job-123")
-
-        monkeypatch.setattr("rq.Queue", FakeQueue)
+        celery_app = MagicMock()
+        celery_app.send_task.return_value = MagicMock(id="job-123")
+        monkeypatch.setattr(jobs_module, "celery_app", celery_app)
 
         jobs_module.enqueue_photo_processing("photo-1")
 
-        assert seen["name"] == "photos"
-        assert seen["connection"] is fake_connection
-        assert seen["fn"] == "app.workers.photo_worker.process_photo"
-        assert seen["photo_id"] == "photo-1"
-        assert seen["job_timeout"] == 300
+        celery_app.send_task.assert_called_once_with(
+            "app.workers.photo_worker.process_photo",
+            args=["photo-1"],
+            queue="photos",
+        )
         jobs_module.record_enqueue.assert_called_once_with("photos")
 
-    def test_enqueue_reraises_when_redis_unavailable(self, monkeypatch):
+    def test_enqueue_reraises_when_broker_unavailable(self, monkeypatch):
         monkeypatch.setattr("app.core.jobs.record_enqueue", MagicMock())
-        redis_mock = MagicMock()
-        redis_mock.from_url.side_effect = RuntimeError("connection refused")
-        monkeypatch.setattr("redis.Redis", redis_mock)
+        celery_app = MagicMock()
+        celery_app.send_task.side_effect = RuntimeError("broker unavailable")
+        monkeypatch.setattr(jobs_module, "celery_app", celery_app)
 
-        with pytest.raises(RuntimeError, match="connection refused"):
+        with pytest.raises(RuntimeError, match="broker unavailable"):
             jobs_module.enqueue_photo_processing("photo-1")
 
         jobs_module.record_enqueue.assert_not_called()

@@ -248,12 +248,12 @@ doesn't support payload indexes).
 
 ### `test_jobs.py` — `core/jobs.py` (2 tests)
 
-**Target:** `enqueue_photo_processing` — Redis connection, RQ queue delegation, and error re-raise.
+**Target:** `enqueue_photo_processing` — Celery task delegation and error re-raise.
 
 | Test | What it was made to test |
 |---|---|
-| `test_enqueue_success_delegates_to_rq_queue` | Fake Redis+RQ: correct queue name (`photos`), correct job function path, `job_timeout=300`, `record_enqueue("photos")` called. |
-| `test_enqueue_reraises_when_redis_unavailable` | Redis.from_url raises → exception re-raised; `record_enqueue` not called. |
+| `test_enqueue_success_delegates_to_celery_task` | Fake Celery app: `send_task("app.workers.photo_worker.process_photo", args=[photo_id], queue="photos")` called, `record_enqueue("photos")` called. |
+| `test_enqueue_reraises_when_broker_unavailable` | `send_task()` raises → exception re-raised; `record_enqueue` not called. |
 
 ---
 
@@ -382,7 +382,7 @@ Helper functions: `register_user(client, ...)`, `login(client, ...)`, `auth_head
 ### `test_api_photos.py` — photo upload/list/file + match feed (10 tests)
 
 A `monkeypatch`-based `autouse` fixture replaces `enqueue_photo_processing` with
-a no-op so uploads never hit Redis. All photo tests create real files in a temp
+a no-op so uploads never hit RabbitMQ. All photo tests create real files in a temp
 directory via the overridden `LocalFileService`.
 
 | Test | What it was made to test |
@@ -405,10 +405,10 @@ directory via the overridden `LocalFileService`.
 These areas are real code but are intentionally excluded from the test suite:
 
 - **`services/embedding_service.py`** (16%) — legacy `InsightFaceEmbeddingService` wrapper around the GPU-bound face-detection ONNX model. Requires downloading the `buffalo_l` model (~100 MB), loading it into memory, and a real ONNX runtime. This is a thin adapter layer over existing InsightFace code; it's tested implicitly when the full pipeline runs. No plans to unit-test it.
-- **`workers/photo_worker.py`** (excluded from coverage) — RQ worker entry point that runs in a separate process. Tested implicitly via the repository/service layer tests above.
+- **`workers/photo_worker.py`** (excluded from coverage) — Celery worker/task entry point that runs in a separate process. Tested implicitly via the repository/service layer tests above.
 - **`core/logging.py`** (95%) — JSON formatter and rotating-file setup. Only the file-rotation handler branch is untested.
 - **`core/middleware.py`** (87%) — `RequestLoggingMiddleware` correlation-id injection. The `process_request` → `call_next` chain requires an async ASGI test harness.
-- **`core/metrics.py`** (52%) — Prometheus counters for RQ queue depth. The `refresh_rq_metrics` function requires a live Redis connection; the remaining lines are the gauge-update loop.
+- **`core/metrics.py`** — Prometheus HTTP latency/status counters and the Celery enqueue counter. Covered indirectly through the request middleware and `test_jobs.py`; RabbitMQ queue depth is scraped from `rabbitmq-exporter`, not this module.
 - **`core/database.py`** (73%) — `get_db` generator and engine setup. The engine creation is a startup-time side effect; the generator body is covered via integration tests.
-- **`main.py`** (79%) — the unhandled-exception handler and metrics endpoint require specific ASGI error conditions and live Redis.
+- **`main.py`** (79%) — the unhandled-exception handler and metrics endpoint require specific ASGI error conditions and live infrastructure.
 - **`api/deps.py`** (89%) — the real (non-overridden) `get_profile_repository`, `get_file_service`, `get_event_face_repository` factories that construct Qdrant/LocalFileService instances. These are thin one-liners; the integration tests override them to avoid connecting to real infrastructure.

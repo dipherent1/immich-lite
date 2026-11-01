@@ -2,6 +2,30 @@
 
 Tracks completed work against [PHASES.md](PHASES.md). See [TODO.md](TODO.md) for what's remaining.
 
+## ✅ Worker queue migration — Redis/RQ → RabbitMQ/Celery
+
+**Goal:** replace the Redis-backed RQ job queue with RabbitMQ + Celery, and remove Redis from the stack entirely (the notification pub/sub moved to RabbitMQ too).
+
+### Backend
+
+- **`core/celery_app.py` (new)** — the Celery app (`broker = RABBITMQ_URL`), JSON serialization, `task_ignore_result=True`, late acks + `reject_on_worker_lost`, prefetch 1, default queue `photos`, and task events (`worker_send_task_events`/`task_send_sent_event`/`task_track_started`) so Flower sees live jobs. `control_queue_exclusive=True` / `event_queue_exclusive=True` keep Celery's pidbox/event queues compatible with RabbitMQ 4.3+, which rejects transient non-exclusive queues. A `worker_ready` signal starts the worker's `:9100` metrics server in the parent process, so `up{job="immich-worker"}` still tracks the real worker process.
+- **`core/jobs.py`** — `enqueue_photo_processing` now sends the task by name (`celery_app.send_task("app.workers.photo_worker.process_photo", args=[photo_id], queue="photos")`) so the API process never imports the worker module (and its CV/ONNX stack); logs the Celery task id (`job_id`) exactly as before. Broker failure is still logged loudly and re-raised.
+- **`workers/photo_worker.py`** — `process_photo` is a bound Celery task (`app.workers.photo_worker.process_photo`) using `self.request.id` for correlation. `main()` boots `setup_logging()` and `celery_app.worker_main(...)` (`--queues=photos`, prefork on Linux / solo on Windows, concurrency from `CELERY_CONCURRENCY`).
+- **`core/notification_publisher.py`** — publishes match notifications to the RabbitMQ fanout exchange `notifications.events` via `pika` (best-effort, errors swallowed as before).
+- **`core/sse_relay.py`** — the API-side relay now consumes that exchange with `aio_pika`, binding an exclusive/auto-delete queue per API process (fanout = every instance sees every event) and persisting + dispatching to SSE as before. Uses a plain `aio_pika.connect()` + explicit retry loop: `connect_robust` returns immediately and blocks forever while the broker is down, which also made shutdown/cancellation hang.
+- **`core/config.py`** — `redis_url` → `rabbitmq_url` (`amqp://…/%2F`; the explicit `%2F` vhost is parsed identically by pika, kombu and aio-pika).
+- **`core/metrics.py`** — `rq_jobs_enqueued_total` → `celery_jobs_enqueued_total`; the app no longer scrapes queue depth from Redis (the exporter does). `main.py` dropped `refresh_rq_metrics`.
+- **Requirements** — removed `redis`/`rq`; added `celery>=5.6` (needed for the exclusive control/event queue settings), `pika`, `aio-pika`, `flower`.
+- **Tests** — `test_jobs.py` now fakes `celery_app.send_task` (+ `record_enqueue`); full suite **206 passed** (~34s).
+
+### Infra & monitoring
+
+- **`docker-compose.yml`** — removed `redis`, `rq-dashboard`, `redis-exporter`; added `rabbitmq:4-management-alpine` (healthcheck, `rabbitmq_storage` volume, `:5672`/`:15672`), `flower` (`:5555`, persistent history in the `flower_data` volume), and `rabbitmq-exporter` (`:9419`, configured with `RABBIT_URL`/`RABBIT_USER`/`RABBIT_PASSWORD`). `app`/`worker` consume `RABBITMQ_URL` instead of `REDIS_URL`.
+- **Validation** — `docker compose config` clean; against a live RabbitMQ 4 broker: Celery `send_task` → `photos` queue → consumed, pika publisher → `notifications.events` fanout → aio-pika consumer (the real notification path), and the worker boots, serves `worker_up 1.0` on `:9100`, and consumes a task. Orphan `immich-lite-redis*`/`rq-dashboard` containers from the old stack were removed.
+- **`.env.example`** — `REDIS_URL` → `RABBITMQ_URL` + `RABBITMQ_DEFAULT_USER`/`PASS` (compose interpolation) + `CELERY_CONCURRENCY`.
+- **Prometheus/alerts** — `redis` target → `rabbitmq`; `RedisDown` → `RabbitMQDown`; stalled-queue alert now uses `rabbitmq_queue_messages_ready{queue="photos"}`; worker alert text says Celery.
+- **Grafana** — Redis health panel → RabbitMQ; queue depth → `rabbitmq_queue_messages_ready`; enqueue rate → `celery_jobs_enqueued_total`; Redis memory panel → RabbitMQ consumers.
+
 ## ✅ Notifications & Join Requests
 
 **Goal:** approval-gated join requests (search → request → owner approve/deny, while share links stay instant-join), plus a persistent notification system (Postgres `notifications`) delivered live over SSE, and the matching frontend (bell + dropdown + full `/notifications` page). Photo-processing *status* live updates are explicitly deferred (kept as manual refresh).
@@ -480,7 +504,7 @@ Time window (simplest option from PHASES.md): an event is joinable when `starts_
 
 ### Notes / environment quirks
 
-- On this Windows host, the OS reserves TCP port ranges (e.g. `6267–6366`, `7906–8005`) that block binding of the standard ports: `6333`/`6334` (Qdrant) and `8000` (API) all fail with WinError 10013 even in plain Python (Docker isn't the cause). The compose file maps to free host ports instead: Qdrant `8090`/`8100`, API `8080`, Postgres `5433`. The Qdrant container also remains reachable over the Docker network. `docker compose up -d` now succeeds on this machine.
+- On this Windows host, the OS reserves TCP port ranges (e.g. `6267–6366`, `7906–8005`) that block binding of the standard ports: `6333`/`6334` (Qdrant) and `8000` (API) all fail with WinError 10013 even in plain Python (Docker isn't the cause). The compose file maps to free host ports instead: Qdrant `8190`/`8191`, API `8080`, Postgres `5433`. The Qdrant container also remains reachable over the Docker network. `docker compose up -d` now succeeds on this machine.
 - The native Windows Postgres owns host port `5432`; this project's Postgres uses host port `5433`.
 
 ## Prior work (pre-Phase 0, preserved)

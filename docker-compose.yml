@@ -3,8 +3,8 @@ services:
     image: qdrant/qdrant:latest
     container_name: immich-qdrant
     ports:
-      - "8090:6333"
-      - "8100:6334"
+      - "8190:6333"
+      - "8191:6334"
     volumes:
       - qdrant_storage:/qdrant/storage
     restart: unless-stopped
@@ -27,33 +27,52 @@ services:
       retries: 10
     restart: unless-stopped
 
-  redis:
-    image: redis:7-alpine
-    container_name: immich-lite-redis
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    container_name: immich-lite-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-immich}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-immich}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_storage:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
 
-  rq-dashboard:
-    image: eoranged/rq-dashboard
-    container_name: immich-lite-rq-dashboard
+  flower:
+    build: ./backend
+    container_name: immich-lite-flower
+    command: ["celery", "-A", "app.core.celery_app", "flower", "--port=5555", "--persistent=True", "--db=/data/flower.db"]
     ports:
-      - "9181:9181"
+      - "5555:5555"
     environment:
-      - RQ_DASHBOARD_REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://${RABBITMQ_DEFAULT_USER:-immich}:${RABBITMQ_DEFAULT_PASS:-immich}@rabbitmq:5672/%2F
+    volumes:
+      - flower_data:/data
     depends_on:
-      redis:
-        condition: service_started
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
 
   # --- Observed services / exporters ---
-  redis-exporter:
-    image: oliver006/redis_exporter:latest
-    container_name: immich-lite-redis-exporter
+  rabbitmq-exporter:
+    image: kbudde/rabbitmq-exporter:latest
+    container_name: immich-lite-rabbitmq-exporter
     ports:
-      - "9121:9121"
-    command: ["-redis.addr", "redis://redis:6379/0"]
+      - "9419:9419"
+    environment:
+      - RABBIT_URL=http://rabbitmq:15672
+      - RABBIT_USER=${RABBITMQ_DEFAULT_USER:-immich}
+      - RABBIT_PASSWORD=${RABBITMQ_DEFAULT_PASS:-immich}
     depends_on:
-      redis:
-        condition: service_started
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
 
   postgres-exporter:
@@ -85,8 +104,8 @@ services:
       - app
       - worker
       - qdrant
-      - redis
-      - redis-exporter
+      - rabbitmq
+      - rabbitmq-exporter
       - postgres-exporter
     restart: unless-stopped
 
@@ -132,15 +151,15 @@ services:
       - QDRANT_URL=http://qdrant:6333
       - DATABASE_URL=postgresql+psycopg2://immich:immich@postgres:5432/immich_lite
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
-      - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://${RABBITMQ_DEFAULT_USER:-immich}:${RABBITMQ_DEFAULT_PASS:-immich}@rabbitmq:5672/%2F
       - MODEL_NAME=buffalo_s
     depends_on:
       qdrant:
         condition: service_started
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_started
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
 
   worker:
@@ -153,21 +172,24 @@ services:
     environment:
       - QDRANT_URL=http://qdrant:6333
       - DATABASE_URL=postgresql+psycopg2://immich:immich@postgres:5432/immich_lite
-      - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://${RABBITMQ_DEFAULT_USER:-immich}:${RABBITMQ_DEFAULT_PASS:-immich}@rabbitmq:5672/%2F
       - MODEL_NAME=buffalo_s
       - OUTPUT_ROOT=/app/output
+      - CELERY_CONCURRENCY=1
     depends_on:
       qdrant:
         condition: service_started
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_started
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   qdrant_storage:
   postgres_storage:
+  rabbitmq_storage:
+  flower_data:
   immich_ml_cache:
   prometheus_data:
   grafana_data:

@@ -6,7 +6,7 @@ read/debug the logs for production.
 
 The headline: logs are **structured JSON** (one object per line) written to a
 rotating file, they carry **correlation ids** (`request_id`, `job_id`,
-`user_id`) so a single upload can be traced end‑to‑end across the API, the RQ
+`user_id`) so a single upload can be traced end‑to‑end across the API, the Celery
 queue and the worker, and they are shaped so a log aggregator (Loki / ELK /
 CloudWatch) can ingest them with **zero reformatting**. A human‑readable console
 format is kept for local / container-journal dev.
@@ -40,10 +40,11 @@ here.
 |---|---|
 | `src/app/core/logging.py` | Central config, the JSON + human formatters, correlation helpers |
 | `src/app/core/middleware.py` | HTTP request logging + sets `request_id` / `user_id` correlation |
-| `src/app/core/jobs.py` | RQ enqueue logging + sets `job_id`, `photo_id` fields |
-| `src/app/workers/photo_worker.py` | Worker lifecycle + per-job correlation (`get_current_job`) |
-| `src/app/core/sse_relay.py` | Redis→SSE notification relay (persists worker events, dispatches live) |
-| `src/app/core/notification_publisher.py` | Worker-side best-effort Redis publish of match notifications |
+| `src/app/core/celery_app.py` | Celery app config + worker metrics signal |
+| `src/app/core/jobs.py` | Celery enqueue logging + sets `job_id`, `photo_id` fields |
+| `src/app/workers/photo_worker.py` | Worker lifecycle + per-task correlation (`self.request.id`) |
+| `src/app/core/sse_relay.py` | RabbitMQ→SSE notification relay (persists worker events, dispatches live) |
+| `src/app/core/notification_publisher.py` | Worker-side best-effort RabbitMQ publish of match notifications |
 | `src/app/services/notification_service.py` | Notification persistence + dispatch + read-state |
 | `src/app/services/join_request_service.py` | Join-request lifecycle + approval notifications |
 | `src/app/main.py` | Boots `setup_logging()`, global unhandled-exception handler, request middleware |
@@ -78,7 +79,7 @@ These are merged in on top (when present):
 | Field | Meaning | Set by |
 |---|---|---|
 | `request_id` | 12‑hex id per HTTP request | middleware |
-| `job_id` | RQ job id, per background job | worker / enqueue |
+| `job_id` | Celery task id, per background job | worker / enqueue |
 | `user_id` | authenticated user id | middleware (from `request.state.user_id`) |
 | `exc` | rendered traceback | any `logger.exception()` / 5xx |
 | any extra fields | `photo_id`, `event_id`, `method`, `path`, `status`, `duration_ms`, `matches`, … | call sites via `extra={"extra_fields": {...}}` |
@@ -116,7 +117,7 @@ id and see the whole life of that work.
 |---|---|---|
 | `request_id` | middleware, at HTTP request start | all deps + service logs during that HTTP request |
 | `user_id` | middleware, after auth | same — the authenticated identity |
-| `job_id` | worker via RQ `get_current_job()`; enqueue logs it too | all ingest + match logs for that photo job |
+| `job_id` | worker via Celery `self.request.id`; enqueue logs it too | all ingest + match logs for that photo job |
 | `photo_id` | enqueue + worker | **cross-process** link: the API and the worker are separate processes, so `photo_id` is the key that ties the enqueue log (API process) to the processing logs (worker process). |
 
 The correlation lives in `contextvars` (`CORRELATION_VARS` in `logging.py`):
@@ -156,7 +157,7 @@ no more "black box".
 
 ### Worker — `workers/photo_worker.py`
 
-- Logs worker startup / reconnect (Redis connection-loss handling).
+- Logs worker startup / reconnect (RabbitMQ connection-loss handling).
 - `process_photo` sets `job_id` correlation and logs `processing photo` with `photo_id` + `event_id`.
 
 ### Services
@@ -169,10 +170,10 @@ no more "black box".
 ### Notifications & join requests
 
 - `app.notifications` — `notification created` with `user_id` + `type` + `id` fields (any persisted notification: join_request, join_approved, join_denied, photo_matched, photo_processed). On SSE-dispatch failure logs `failed to dispatch SSE notification …` with `exc_info` (the row is still written — dispatch is best-effort).
-- `app.notifications.sse` (in `core/sse_relay.py`) — the background Redis→SSE relay: `notification SSE relay subscribed to notifications:events`, and per-event relay errors. This is the bridge that turns **worker**-published match notifications into persisted rows + live SSE pushes.
+- `app.notifications.sse` (in `core/sse_relay.py`) — the background RabbitMQ→SSE relay: `notification SSE relay subscribed to notifications.events`, and per-event relay errors. This is the bridge that turns **worker**-published match notifications into persisted rows + live SSE pushes.
 - `app.join_request` — join-request lifecycle (request created, approved, denied) with `event_id` / `requester_id` / `request_id` fields.
 
-The worker publishes match notifications via `core/notification_publisher.py` (logger `app.notifications`: `published notification event user_id=… type=photo_matched`), which the app's `app.notifications.sse` relay later persists + delivers.
+The worker publishes match notifications to the RabbitMQ `notifications.events` fanout exchange via `core/notification_publisher.py` (logger `app.notifications`: `published notification event user_id=… type=photo_matched`), which the app's `app.notifications.sse` relay later persists + delivers.
 
 ---
 
@@ -216,12 +217,13 @@ docker exec immich-lite-app tail -f /app/logs/app.log
 | **Grafana dashboard** (all services at a glance) | http://localhost:3001 → "Immich Lite" (login `admin`/`admin`) |
 | **Prometheus** (query/metrics + alert rules) | http://localhost:9090 |
 | **Alertmanager** (alerts + notifications) | http://localhost:9093 |
-| **RQ Dashboard** (photo queue + job status) | http://localhost:9181 |
-| **Qdrant** (collections, points, vectors) | http://localhost:8090/dashboard |
+| **Flower** (Celery workers + task status) | http://localhost:5555 |
+| **RabbitMQ management** (queues, exchanges, consumers) | http://localhost:15672 |
+| **Qdrant** (collections, points, vectors) | http://localhost:8190/dashboard |
 | **Postgres** | pgAdmin (your existing setup) |
 | **App API** (FastAPI auto-docs) | http://localhost:8080/docs |
 | **App metrics** (raw Prometheus format) | http://localhost:8080/metrics |
-| **Redis / Postgres exporter endpoints** | http://localhost:9121/metrics / http://localhost:9187/metrics |
+| **RabbitMQ / Postgres exporter endpoints** | http://localhost:9419/metrics / http://localhost:9187/metrics |
 
 > The **worker** metrics (`:9100`) are internal only — Prometheus reaches them
 > at `worker:9100` on the docker network, not exposed to the host.
@@ -239,7 +241,7 @@ docker logs immich-lite-app 2>&1 | Select-String "409f3c05c6e4"
 docker exec immich-lite-app tail -f /app/logs/app.log | Select-String "photo_id=acc1c43e"
 
 # Worker-alive / reconnect noise
-docker logs immich-lite-worker 2>&1 | Select-String "reconnect|Redis"
+docker logs immich-lite-worker 2>&1 | Select-String "reconnect|RabbitMQ|Celery"
 ```
 
 ### For production (large volume)

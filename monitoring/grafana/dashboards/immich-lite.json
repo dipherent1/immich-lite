@@ -62,8 +62,8 @@
       "gridPos": { "h": 5, "w": 4, "x": 12, "y": 1 },
       "id": 5,
       "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [ { "exemplar": true, "expr": "up{job=\"redis\"}", "instant": true, "refId": "A" } ],
-      "title": "Redis up",
+      "targets": [ { "exemplar": true, "expr": "rabbitmq_up", "instant": true, "refId": "A" } ],
+      "title": "RabbitMQ up",
       "type": "stat"
     },
     {
@@ -96,7 +96,7 @@
       "gridPos": { "h": 6, "w": 12, "x": 0, "y": 7 },
       "id": 8,
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] }, "tooltip": { "mode": "single", "sort": "none" } },
-      "targets": [ { "exemplar": true, "expr": "rq_queue_depth{queue=\"photos\"}", "legendFormat": "{{queue}}", "range": true, "refId": "A" } ],
+      "targets": [ { "exemplar": true, "expr": "rabbitmq_queue_messages_ready{queue=\"photos\"}", "legendFormat": "{{queue}}", "range": true, "refId": "A" } ],
       "title": "Photos queue depth",
       "type": "timeseries"
     },
@@ -109,7 +109,7 @@
       "gridPos": { "h": 6, "w": 12, "x": 12, "y": 7 },
       "id": 9,
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [ { "exemplar": true, "expr": "sum(rate(rq_jobs_enqueued_total[5m])) by (queue)", "legendFormat": "{{queue}}", "range": true, "refId": "A" } ],
+      "targets": [ { "exemplar": true, "expr": "sum(rate(celery_jobs_enqueued_total[5m])) by (queue)", "legendFormat": "{{queue}}", "range": true, "refId": "A" } ],
       "title": "Job enqueue rate (per 5m)",
       "type": "timeseries"
     },
@@ -156,8 +156,8 @@
       "gridPos": { "h": 6, "w": 8, "x": 0, "y": 20 },
       "id": 13,
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [ { "exemplar": true, "expr": "redis_memory_used_bytes", "legendFormat": "redis", "range": true, "refId": "A" } ],
-      "title": "Redis memory (bytes)",
+      "targets": [ { "exemplar": true, "expr": "rabbitmq_queue_consumers{queue=\"photos\"}", "legendFormat": "consumers", "range": true, "refId": "A" } ],
+      "title": "RabbitMQ consumers (photos)",
       "type": "timeseries"
     },
     {

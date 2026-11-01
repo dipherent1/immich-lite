@@ -21,7 +21,7 @@ self-contained under `backend/`; the frontend and monitoring stacks mirror it.
 
 ```text
 immich-lite/
-├── docker-compose.yml            # full stack: qdrant, postgres, redis, rq-dashboard,
+├── docker-compose.yml            # full stack: qdrant, postgres, rabbitmq, flower,
 │                                 #   exporters, prometheus, alertmanager, grafana, app, worker
 ├── .env                          # gitignored — compose interpolation + local dev (loaded from repo root)
 ├── .env.example                  # template of required/optional env vars
@@ -40,16 +40,16 @@ immich-lite/
 │   │   │       ├── api.py        # aggregates all routers under prefix /api/v1
 │   │   │       └── endpoints/    # auth, users, events, join_requests, matches, notifications
 │   │   ├── core/                 # config, database, security, logging, middleware, metrics,
-│   │   │                         #   vector_db (Qdrant repos), file_storage, jobs, sse, sse_relay,
-│   │   │                         #   notification_publisher, worker_metrics
+│   │   │                         #   vector_db (Qdrant repos), file_storage, jobs, celery_app,
+│   │   │                         #   sse, sse_relay, notification_publisher, worker_metrics
 │   │   ├── domain/               # entities.py + interfaces.py (Phase 0 value types / ABCs)
 │   │   ├── models/               # SQLModel ORM: user, event, event_attendee, photo, photo_match,
 │   │   │                         #   join_request, notification
 │   │   ├── repositories/         # one class per aggregate — the ONLY layer with raw SQL
 │   │   ├── schemas/              # Pydantic v2 request/response DTOs (one file per aggregate)
 │   │   ├── services/             # business logic, raise HTTPException on errors
-│   │   └── workers/              # photo_worker.py — RQ worker entry point
-│   └── tests/                    # unit/ · repositories/ · integration/ (191 tests)
+│   │   └── workers/              # photo_worker.py — Celery worker + task entry point
+│   └── tests/                    # unit/ · repositories/ · integration/ (206 tests)
 ├── frontend/                     # Next.js 16, App Router, TypeScript, @/* alias, src/
 │   └── src/
 │       ├── app/                  # routes
@@ -91,7 +91,7 @@ immich-lite/
 - **Dependency injection** via `Depends()` for DB sessions, current user, Qdrant client. No global state, no manual singletons.
 - **Never expose the user id.** The authenticated user's id is always derived server-side from the JWT (`decode_access_token` → `sub` → `get_current_user`); no route trusts a client-supplied id, and no `*Response` schema includes the raw id. Use the DB user object's `.id` only internally (token `sub`, vector/profile lookups, logging).
 - **Pydantic v2**, separate `*Create` / `*Response` schemas.
-- **Async endpoints** for I/O-bound routes (DB, Qdrant, file upload). Use plain `def` (or a thread/worker offload) for the CPU-bound face-detection/embedding step so it doesn't block the event loop. Face enrollment/scan and photo ingestion both offload to non-event-loop contexts; the RQ worker does the heavy work for uploads.
+- **Async endpoints** for I/O-bound routes (DB, Qdrant, file upload). Use plain `def` (or a thread/worker offload) for the CPU-bound face-detection/embedding step so it doesn't block the event loop. Face enrollment/scan and photo ingestion both offload to non-event-loop contexts; the Celery worker (RabbitMQ broker) does the heavy work for uploads.
 - **HTTPException only** for errors — no ad-hoc dict responses.
 - **Alembic owns every schema change** — never rely on `Base.metadata.create_all()` or ORM auto-sync outside of local scratch scripts. Every model addition or change ships with a generated migration in `backend/migrations/versions/`, committed in the same change as the model.
 
@@ -106,7 +106,7 @@ immich-lite/
 
 ### Phase 6 specifics (already shipped, keep these seams intact)
 
-- **Notifications** — Postgres `notifications` table is the source of truth; Redis pub/sub (`notifications:events`) is the enforcement transport. `core/notification_publisher.py` (worker side, best-effort) → `core/sse_relay.py` (app-side async subscriber, started at startup and held by a **strong reference** in `main.py`) → `core/sse.py` (`SSEManager`, one `asyncio.Queue` per live client, 15s keepalives) → browser.
+- **Notifications** — Postgres `notifications` table is the source of truth; a RabbitMQ fanout exchange (`notifications.events`) is the enforcement transport. `core/notification_publisher.py` (worker side, best-effort) → `core/sse_relay.py` (app-side async consumer with its own exclusive queue, started at startup and held by a **strong reference** in `main.py`) → `core/sse.py` (`SSEManager`, one `asyncio.Queue` per live client, 15s keepalives) → browser.
 - **Matching integration** — `matching_service.match_photo` returns `set[str]` of matched attendee ids; the worker publishes a `photo_matched` notification per matched user (excluding the uploader).
 - **Attendee backfill** — a user who becomes an attendee after photos already exist is matched against the event's stored faces (`MatchingService.match_new_attendee`), gated on `added` in both `EventService.join` and `JoinRequestService.approve`, wrapped in try/except so a Qdrant hiccup never breaks join/approve.
 - **Metrics** — `core/metrics.py` (API, `GET /metrics`) + `core/worker_metrics.py` (`:9100`, worker-alive signal) + Prometheus/Grafana/alerts in `monitoring/`.

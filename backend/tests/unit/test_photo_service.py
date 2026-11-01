@@ -141,7 +141,7 @@ def test_upload_queue_down_upload_still_succeeds(event_repo, photo_repo, file_se
     photo_repo.create.return_value = _photo()
 
     def boom(photo_id):
-        raise RuntimeError("redis down")
+        raise RuntimeError("broker down")
 
     monkeypatch.setattr("app.services.photo_service.enqueue_photo_processing", boom)
     photo = service.upload("user-1", "event-1", "photo.jpg", b"data")

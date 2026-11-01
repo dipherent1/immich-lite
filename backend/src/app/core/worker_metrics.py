@@ -1,9 +1,9 @@
-"""Minimal Prometheus metrics HTTP server for the RQ worker.
+"""Minimal Prometheus metrics HTTP server for the Celery worker.
 
 The worker exposes its own /metrics (on port 9100) so Prometheus has a direct
-"is the worker process actually alive" signal — `up{job="worker"}` — plus the
-number of jobs currently being processed. Kept dependency-light: a stdlib
-`ThreadingHTTPServer`, no web framework needed inside the worker.
+"is the worker process actually alive" signal — `up{job="immich-worker"}` — plus
+the `worker_up` gauge. Kept dependency-light: a stdlib `ThreadingHTTPServer`, no
+web framework needed inside the worker.
 """
 
 from __future__ import annotations
@@ -18,6 +18,10 @@ from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
 logger = logging.getLogger("app.worker_metrics")
 
 WORKER_UP = Gauge("worker_up", "1 if the worker process is alive and serving metrics")
+
+_server: ThreadingHTTPServer | None = None
+_thread: threading.Thread | None = None
+_lock = threading.Lock()
 
 
 class _MetricsHandler(BaseHTTPRequestHandler):
@@ -38,12 +42,18 @@ class _MetricsHandler(BaseHTTPRequestHandler):
         return
 
 
-def start_metrics_server(port: int = 9100) -> threading.Thread:
-    """Start the metrics HTTP server in a daemon thread. Returns the thread."""
-    WORKER_UP.set(1)
+def start_metrics_server(port: int = 9100) -> threading.Thread | None:
+    """Start the metrics HTTP server once. Safe if called again on reconnect."""
+    global _server, _thread
 
-    server = ThreadingHTTPServer(("0.0.0.0", port), _MetricsHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True, name="metrics-http")
-    thread.start()
+    with _lock:
+        if _thread is not None:
+            return _thread
+        WORKER_UP.set(1)
+        _server = ThreadingHTTPServer(("0.0.0.0", port), _MetricsHandler)
+        _thread = threading.Thread(
+            target=_server.serve_forever, daemon=True, name="metrics-http"
+        )
+        _thread.start()
     logger.info("worker metrics server listening on :%d", port)
-    return thread
+    return _thread

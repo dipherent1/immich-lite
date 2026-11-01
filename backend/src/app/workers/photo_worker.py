@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 import os
-import time
+import sys
 
+from app.core.celery_app import celery_app
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.core.file_storage import LocalFileService
@@ -51,8 +52,9 @@ def _build_job() -> tuple[IngestionService, MatchingService, SessionLocal]:
     return ingestion, matching, db
 
 
-def process_photo(photo_id: str) -> int:
-    """RQ job: process a single uploaded photo, then match it to attendees.
+@celery_app.task(bind=True, name="app.workers.photo_worker.process_photo")
+def process_photo(self, photo_id: str) -> int:
+    """Celery task: process a single uploaded photo, then match it to attendees.
 
     1. Ingestion — detect + embed every face and store them in `event_faces`.
     2. Matching  — for each stored face, search attendees' `user_profiles`
@@ -63,13 +65,9 @@ def process_photo(photo_id: str) -> int:
     in — for volume growth the embedding call stays thread/process-offloaded
     and this worker can be scaled independently of the API container.
     """
-    from rq import get_current_job
-
     from app.core.logging import clear_correlation, set_correlation
 
-    job = get_current_job()
-    if job is not None:
-        set_correlation(job_id=job.id)
+    set_correlation(job_id=self.request.id)
     ingestion, matching, db = _build_job()
     try:
         photo = ingestion.process_by_id(photo_id)
@@ -90,7 +88,7 @@ def process_photo(photo_id: str) -> int:
 def _publish_match_notifications(photo, matched_user_ids: set[str], db) -> None:
     """Notify every attendee whose face matched this photo. Best-effort: a
     notification failure never marks the job as failed (publish_notification
-    already swallows Redis errors)."""
+    already swallows RabbitMQ errors)."""
     from app.core.notification_publisher import publish_notification
     from app.repositories.event_repository import EventRepository
 
@@ -112,49 +110,31 @@ def _publish_match_notifications(photo, matched_user_ids: set[str], db) -> None:
 
 
 def main() -> None:
-    import logging.config
-
     from app.core.logging import setup_logging
 
     setup_logging()
 
-    from redis import Redis
-    from redis.exceptions import ConnectionError as RedisConnectionError
-    from redis.exceptions import TimeoutError as RedisTimeoutError
-    from rq import Queue, Worker
+    # Prefork is the default on Linux; solo is required for a native Windows
+    # dev run (prefork is not supported there).
+    pool = "solo" if sys.platform == "win32" else "prefork"
+    concurrency = os.environ.get("CELERY_CONCURRENCY", "1")
 
-    settings = get_settings()
-    redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-
-    # Expose a /metrics endpoint so Prometheus can alert the moment the worker
-    # process dies (up{job="worker"} == 0). Served from the parent process that
-    # lives for the whole worker lifecycle.
-    from app.core.worker_metrics import start_metrics_server
-
-    start_metrics_server(port=int(os.environ.get("WORKER_METRICS_PORT", "9100")))
-
-    # The worker is long-lived but its Redis connection can hit a transient
-    # socket timeout; RQ's work() then quits and the process dies, leaving any
-    # queued photo job (and thus its matching) silently stalled. Keep the
-    # connection alive with keepalive + retry-on-timeout and, should it ever
-    # break anyway, reconnect and resume in a fresh loop instead of exiting.
-    while True:
-        try:
-            connection = Redis.from_url(
-                redis_url,
-                socket_keepalive=True,
-                socket_timeout=None,
-                socket_connect_timeout=10,
-                retry_on_timeout=True,
-            )
-            queue = Queue("photos", connection=connection)
-            worker = Worker([queue], connection=connection)
-            logger.info("photo worker starting (pid=%s) redis=%s", os.getpid(), redis_url)
-            worker.work(with_scheduler=False)
-            logger.warning("photo worker work() returned; reconnecting")
-        except (RedisConnectionError, RedisTimeoutError) as exc:
-            logger.warning("photo worker lost Redis connection (%s); reconnecting", exc)
-        time.sleep(3)
+    logger.info(
+        "photo worker starting (pid=%s) broker=%s pool=%s concurrency=%s",
+        os.getpid(),
+        get_settings().rabbitmq_url,
+        pool,
+        concurrency,
+    )
+    celery_app.worker_main(
+        argv=[
+            "worker",
+            "--loglevel=INFO",
+            "--queues=photos",
+            f"--pool={pool}",
+            f"--concurrency={concurrency}",
+        ]
+    )
 
 
 if __name__ == "__main__":

@@ -43,7 +43,7 @@ class QdrantProfileRepository:
         api_key: str | None = None,
         collection_name: str = "user_profiles",
     ) -> None:
-        self._url = url or os.environ.get("QDRANT_URL", "http://localhost:8090")
+        self._url = url or os.environ.get("QDRANT_URL", "http://localhost:8190")
         self._api_key = api_key or os.environ.get("QDRANT_API_KEY") or None
         self._collection_name = collection_name
         self._client = QdrantClient(url=self._url, api_key=self._api_key)
@@ -142,7 +142,7 @@ class EventFaceRepository:
         api_key: str | None = None,
         collection_name: str = "event_faces",
     ) -> None:
-        self._url = url or os.environ.get("QDRANT_URL", "http://localhost:8090")
+        self._url = url or os.environ.get("QDRANT_URL", "http://localhost:8190")
         self._api_key = api_key or os.environ.get("QDRANT_API_KEY") or None
         self._collection_name = collection_name or os.environ.get("QDRANT_EVENT_FACES_COLLECTION", "event_faces")
         self._client = QdrantClient(url=self._url, api_key=self._api_key)
@@ -281,7 +281,7 @@ class QdrantEmbeddingRepository(EmbeddingRepository):
         api_key: str | None = None,
         collection_name: str = "face_embeddings",
     ) -> None:
-        self._url = url or os.environ.get("QDRANT_URL", "http://localhost:8090")
+        self._url = url or os.environ.get("QDRANT_URL", "http://localhost:8190")
         self._api_key = api_key or os.environ.get("QDRANT_API_KEY") or None
         self._collection_name = collection_name or os.environ.get("QDRANT_COLLECTION_NAME", "face_embeddings")
         self._client = QdrantClient(url=self._url, api_key=self._api_key)
