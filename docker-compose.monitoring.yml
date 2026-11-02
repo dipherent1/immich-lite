@@ -18,6 +18,8 @@ services:
       - monitoring
     environment:
       - RABBITMQ_URL=amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/%2F
+    ports:
+      - "127.0.0.1:5555:5555"
     volumes:
       - flower_data:/data
     depends_on:
@@ -35,6 +37,8 @@ services:
       - monitoring
     environment:
       - DOZZLE_BASE=/dozzle
+    ports:
+      - "127.0.0.1:8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
@@ -48,12 +52,31 @@ services:
     profiles:
       - monitoring
     environment:
-      - APP_URL=${BESZEL_APP_URL:-http://localhost/beszel}
+      - APP_URL=http://77.113.191.53/beszel
+    ports:
+      - "127.0.0.1:8090:8090"
     volumes:
       - beszel_data:/beszel_data
+      - ./beszel_socket:/beszel_socket
     networks:
       - app-network
     restart: unless-stopped
+  
+  beszel-agent:
+    image: henrygd/beszel-agent
+    container_name: beszel-agent
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./beszel_agent_data:/var/lib/beszel-agent
+      # monitor other disks / partitions by mounting a folder in /extra-filesystems
+      # - /mnt/disk/.beszel:/extra-filesystems/sda1:ro
+    environment:
+      LISTEN: 45876
+      KEY: ${BESZEL_KEY}
+      TOKEN: ${BESZEL_TOKEN}
+      HUB_URL: ${BESZEL_APP_URL}
 
 volumes:
   flower_data:
