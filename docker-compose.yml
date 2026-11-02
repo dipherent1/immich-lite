@@ -1,177 +1,64 @@
 services:
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: immich-qdrant
-    ports:
-      - "8190:6333"
-      - "8191:6334"
-    volumes:
-      - qdrant_storage:/qdrant/storage
-    restart: unless-stopped
-
+  # --- Core persistence & message broker ---
   postgres:
     image: postgres:16-alpine
     container_name: immich-lite-postgres
     environment:
-      POSTGRES_USER: immich
-      POSTGRES_PASSWORD: immich
-      POSTGRES_DB: immich_lite
-    ports:
-      - "5433:5432"
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-immich_lite}
     volumes:
       - postgres_storage:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U immich -d immich_lite" ]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB:-immich_lite}"]
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.0
+    container_name: immich-qdrant
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    networks:
+      - app-network
     restart: unless-stopped
 
   rabbitmq:
     image: rabbitmq:4-management-alpine
     container_name: immich-lite-rabbitmq
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-immich}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-immich}
-    ports:
-      - "5672:5672"
-      - "15672:15672"
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?RABBITMQ_DEFAULT_USER is required}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}
     volumes:
       - rabbitmq_storage:/var/lib/rabbitmq
     healthcheck:
-      test: [ "CMD", "rabbitmq-diagnostics", "-q", "ping" ]
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
       retries: 10
+    networks:
+      - app-network
     restart: unless-stopped
 
-  flower:
-    build: ./backend
-    container_name: immich-lite-flower
-    command: [ "celery", "-A", "app.core.celery_app", "flower", "--port=5555", "--persistent=True", "--db=/data/flower.db" ]
-    ports:
-      - "5555:5555"
-    environment:
-      - RABBITMQ_URL=amqp://${RABBITMQ_DEFAULT_USER:-immich}:${RABBITMQ_DEFAULT_PASS:-immich}@rabbitmq:5672/%2F
-    volumes:
-      - flower_data:/data
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # --- Observed services / exporters ---
-  rabbitmq-exporter:
-    image: kbudde/rabbitmq-exporter:latest
-    container_name: immich-lite-rabbitmq-exporter
-    ports:
-      - "9419:9419"
-    environment:
-      - RABBIT_URL=http://rabbitmq:15672
-      - RABBIT_USER=${RABBITMQ_DEFAULT_USER:-immich}
-      - RABBIT_PASSWORD=${RABBITMQ_DEFAULT_PASS:-immich}
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    restart: unless-stopped
-
-  postgres-exporter:
-    image: prometheuscommunity/postgres-exporter:latest
-    container_name: immich-lite-postgres-exporter
-    ports:
-      - "9187:9187"
-    environment:
-      - DATA_SOURCE_NAME=postgresql://immich:immich@postgres:5432/immich_lite?sslmode=disable
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # --- Core monitoring stack ---
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: immich-lite-prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
-      - prometheus_data:/prometheus
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.retention.time=15d"
-    depends_on:
-      - app
-      - worker
-      - qdrant
-      - rabbitmq
-      - rabbitmq-exporter
-      - postgres-exporter
-    restart: unless-stopped
-
-  alertmanager:
-    image: prom/alertmanager:latest
-    container_name: immich-lite-alertmanager
-    ports:
-      - "9093:9093"
-    volumes:
-      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
-    command:
-      - "--config.file=/etc/alertmanager/alertmanager.yml"
-    depends_on:
-      - prometheus
-    restart: unless-stopped
-
-  grafana:
-    image: grafana/grafana:latest
-    container_name: immich-lite-grafana
-    ports:
-      - "3001:3000"
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
-      - GF_USERS_ALLOW_SIGN_UP=false
-    volumes:
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana_data:/var/lib/grafana
-    depends_on:
-      - prometheus
-    restart: unless-stopped
-
-  # --- Admin / Ops & container monitoring ---
-  dozzle:
-    image: amir20/dozzle:latest
-    container_name: immich-lite-dozzle
-    ports:
-      - "${DOZZLE_PORT:-8889}:8080"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    restart: unless-stopped
-
-  beszel:
-    image: henrygd/beszel:latest
-    container_name: immich-lite-beszel
-    ports:
-      - "${BESZEL_PORT:-8890}:8090"
-    volumes:
-      - beszel_data:/beszel_data
-    restart: unless-stopped
-
+  # --- Application backend & worker ---
   app:
     build: ./backend
     container_name: immich-lite-app
-    ports:
-      - "8080:8000"
     volumes:
       - ./output:/app/output
       - immich_ml_cache:/root/.cache/immich_ml
     environment:
       - QDRANT_URL=http://qdrant:6333
-      - DATABASE_URL=postgresql+psycopg2://immich:immich@postgres:5432/immich_lite
-      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
-      - RABBITMQ_URL=amqp://${RABBITMQ_DEFAULT_USER:-immich}:${RABBITMQ_DEFAULT_PASS:-immich}@rabbitmq:5672/%2F
-      - MODEL_NAME=buffalo_s
+      - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-immich_lite}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - RABBITMQ_URL=amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/%2F
+      - MODEL_NAME=${MODEL_NAME:-buffalo_s}
+      - OUTPUT_ROOT=${OUTPUT_ROOT:-/app/output}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost,http://localhost:80,http://localhost:3000}
     depends_on:
       qdrant:
         condition: service_started
@@ -179,22 +66,24 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    networks:
+      - app-network
     restart: unless-stopped
 
   worker:
     build: ./backend
     container_name: immich-lite-worker
-    command: [ "python", "-m", "app.workers.photo_worker" ]
+    command: ["python", "-m", "app.workers.photo_worker"]
     volumes:
       - ./output:/app/output
       - immich_ml_cache:/root/.cache/immich_ml
     environment:
       - QDRANT_URL=http://qdrant:6333
-      - DATABASE_URL=postgresql+psycopg2://immich:immich@postgres:5432/immich_lite
-      - RABBITMQ_URL=amqp://${RABBITMQ_DEFAULT_USER:-immich}:${RABBITMQ_DEFAULT_PASS:-immich}@rabbitmq:5672/%2F
-      - MODEL_NAME=buffalo_s
-      - OUTPUT_ROOT=/app/output
-      - CELERY_CONCURRENCY=1
+      - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-immich_lite}
+      - RABBITMQ_URL=amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/%2F
+      - MODEL_NAME=${MODEL_NAME:-buffalo_s}
+      - OUTPUT_ROOT=${OUTPUT_ROOT:-/app/output}
+      - CELERY_CONCURRENCY=${CELERY_CONCURRENCY:-1}
     depends_on:
       qdrant:
         condition: service_started
@@ -202,28 +91,48 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    networks:
+      - app-network
     restart: unless-stopped
 
+  # --- Application frontend ---
   frontend:
     build:
       context: ./frontend
       args:
-        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
     container_name: immich-lite-frontend
-    ports:
-      - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-}
     depends_on:
       - app
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # --- Reverse proxy (sole public entrypoint) ---
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: immich-lite-nginx
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      - app
+      - frontend
+    networks:
+      - app-network
     restart: unless-stopped
 
 volumes:
-  qdrant_storage:
   postgres_storage:
+  qdrant_storage:
   rabbitmq_storage:
-  flower_data:
   immich_ml_cache:
-  prometheus_data:
-  grafana_data:
-  beszel_data:
+
+networks:
+  app-network:
+    name: immich-lite-network
+    driver: bridge

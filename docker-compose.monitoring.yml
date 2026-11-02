@@ -1,0 +1,64 @@
+services:
+  # Celery task and worker monitoring UI
+  flower:
+    build: ./backend
+    container_name: immich-lite-flower
+    command:
+      [
+        "celery",
+        "-A",
+        "app.core.celery_app",
+        "flower",
+        "--port=5555",
+        "--url_prefix=flower",
+        "--persistent=True",
+        "--db=/data/flower.db",
+      ]
+    profiles:
+      - monitoring
+    environment:
+      - RABBITMQ_URL=amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/%2F
+    volumes:
+      - flower_data:/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Real-time container log viewer
+  dozzle:
+    image: amir20/dozzle:v11.4.0
+    container_name: immich-lite-dozzle
+    profiles:
+      - monitoring
+    environment:
+      - DOZZLE_BASE=/dozzle
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Lightweight system and container resource monitoring hub
+  beszel:
+    image: henrygd/beszel:0.21.1
+    container_name: immich-lite-beszel
+    profiles:
+      - monitoring
+    environment:
+      - APP_URL=${BESZEL_APP_URL:-http://localhost/beszel}
+    volumes:
+      - beszel_data:/beszel_data
+    networks:
+      - app-network
+    restart: unless-stopped
+
+volumes:
+  flower_data:
+  beszel_data:
+
+networks:
+  app-network:
+    name: immich-lite-network
