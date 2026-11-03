@@ -25,6 +25,8 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.19.0
     container_name: immich-qdrant
+    ports:
+      - "127.0.0.1:8190:6333"
     volumes:
       - qdrant_storage:/qdrant/storage
     networks:
