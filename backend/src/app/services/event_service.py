@@ -41,21 +41,23 @@ class EventService:
         self._notifications = notifications
 
     @staticmethod
-    def _naive_utc(dt: datetime) -> datetime:
-        if dt.tzinfo is not None:
-            return dt.astimezone(timezone.utc).replace(tzinfo=None)
-        return dt
+    def _to_utc(dt: datetime) -> datetime:
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    # Alias for backwards compatibility
+    _naive_utc = _to_utc
 
     @classmethod
     def is_active(cls, event: Event, now: datetime | None = None) -> bool:
-        # The events columns are `timestamp without time zone` (naive). The app
-        # stores UTC wall-clock values, so compare everything in naive UTC.
-        now = cls._naive_utc(now or datetime.now(timezone.utc))
-        starts_at = cls._naive_utc(event.starts_at)
+        # Compare everything in UTC.
+        now = cls._to_utc(now or datetime.now(timezone.utc))
+        starts_at = cls._to_utc(event.starts_at)
         if now < starts_at:
             return False
         if event.expires_at is not None:
-            expires_at = cls._naive_utc(event.expires_at)
+            expires_at = cls._to_utc(event.expires_at)
             if now > expires_at:
                 return False
         return True
@@ -73,10 +75,10 @@ class EventService:
                 detail="You must scan your face profile before creating an event",
             )
 
-        starts_at = self._naive_utc(payload.starts_at)
+        starts_at = self._to_utc(payload.starts_at)
         expires_at = None
         if payload.expires_at is not None:
-            expires_at = self._naive_utc(payload.expires_at)
+            expires_at = self._to_utc(payload.expires_at)
         if expires_at is not None and expires_at <= starts_at:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
