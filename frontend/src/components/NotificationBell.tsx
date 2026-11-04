@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { useNotifications } from "@/lib/notifications";
 import type { NotificationResponse } from "@/lib/api";
+import { Icon } from "@/components/ui";
 
 function timeAgo(iso: string): string {
   const then = new Date(iso).getTime();
@@ -23,21 +24,28 @@ function timeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
-function iconFor(type: string): string {
+function iconFor(type: string): React.ReactNode {
   switch (type) {
     case "join_request":
-      return "👋";
+      return <Icon.Users size={17} />;
     case "join_approved":
-      return "✅";
+      return <Icon.Check size={17} />;
     case "join_denied":
-      return "🚫";
+      return <Icon.X size={17} />;
     case "photo_matched":
-      return "📷";
+      return <Icon.Images size={17} />;
     case "photo_processed":
-      return "⚙️";
+      return <Icon.Upload size={17} />;
     default:
-      return "🔔";
+      return <Icon.Bell size={17} />;
   }
+}
+
+function iconTone(type: string): React.CSSProperties {
+  if (type === "photo_matched") return { background: "var(--accent-soft)", color: "var(--accent)" };
+  if (type === "join_approved") return { background: "var(--ok-soft)", color: "var(--ok)" };
+  if (type === "join_denied") return { background: "var(--danger-soft)", color: "var(--danger)" };
+  return {};
 }
 
 function subjectHref(n: NotificationResponse): string {
@@ -61,40 +69,22 @@ function NotificationItem({
     <button
       type="button"
       onClick={() => onNavigate(notif)}
-      style={{
-        display: "flex",
-        gap: 10,
-        alignItems: "flex-start",
-        width: "100%",
-        border: "none",
-        background: notif.is_read ? "transparent" : "#f4f8ff",
-        padding: "10px 12px",
-        cursor: "pointer",
-        textAlign: "left",
-        fontSize: "0.9rem",
-        borderBottom: "1px solid #eee",
-      }}
+      className={`notif${notif.is_read ? "" : " unread"}`}
     >
-      <span style={{ fontSize: "1.1rem" }}>{iconFor(notif.type)}</span>
+      <span className="notif-icon" style={iconTone(notif.type)}>
+        {iconFor(notif.type)}
+      </span>
       <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ fontWeight: 600, display: "block" }}>{notif.title}</span>
-        <span style={{ color: "#555", display: "block" }}>{notif.body}</span>
-        <span style={{ color: "#999", fontSize: "0.78rem" }}>{timeAgo(notif.created_at)}</span>
+        <span className="notif-title">{notif.title}</span>
+        <span className="notif-body">{notif.body}</span>
+        <span className="notif-time">{timeAgo(notif.created_at)}</span>
       </span>
       {!notif.is_read && (
         <span
+          className="unread-dot"
           onClick={(e) => {
             e.stopPropagation();
             onMarkRead(notif.id);
-          }}
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: "50%",
-            background: "#1a7f37",
-            flexShrink: 0,
-            marginTop: 4,
-            cursor: "pointer",
           }}
           title="Mark as read"
         />
@@ -133,83 +123,31 @@ export default function NotificationBell() {
       <button
         type="button"
         aria-label="Notifications"
+        className="icon-btn"
         onClick={() => setOpen((o) => !o)}
-        style={{
-          position: "relative",
-          border: "1px solid #e2e2e2",
-          background: "#fff",
-          borderRadius: 8,
-          padding: "8px 12px",
-          cursor: "pointer",
-          fontSize: "1.1rem",
-        }}
+        style={{ position: "relative" }}
       >
-        🔔
-        {unreadCount > 0 && (
-          <span
-            style={{
-              position: "absolute",
-              top: -6,
-              right: -6,
-              background: "#cf222e",
-              color: "#fff",
-              borderRadius: "50%",
-              fontSize: "0.7rem",
-              minWidth: 18,
-              height: 18,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "0 4px",
-              fontWeight: 700,
-            }}
-          >
-            {unreadCount}
-          </span>
-        )}
+        <Icon.Bell />
+        {unreadCount > 0 && <span className="count-badge">{unreadCount}</span>}
       </button>
 
       {open && (
-        <div
-          style={{
-            position: "absolute",
-            right: 0,
-            top: "calc(100% + 8px)",
-            width: 340,
-            maxHeight: 420,
-            overflowY: "auto",
-            background: "#fff",
-            border: "1px solid #ddd",
-            borderRadius: 10,
-            boxShadow: "0 6px 20px rgba(0,0,0,0.12)",
-            zIndex: 50,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "10px 12px",
-              borderBottom: "1px solid #eee",
-            }}
-          >
+        <div className="notif-pop">
+          <div className="notif-pop-head">
             <strong>Notifications</strong>
-            <span style={{ display: "flex", gap: 10 }}>
-              <button
-                type="button"
-                onClick={markAllRead}
-                style={{ border: "none", background: "none", color: "#1a7f37", cursor: "pointer", fontSize: "0.85rem" }}
-              >
+            <span className="row" style={{ gap: 14 }}>
+              <button type="button" onClick={markAllRead} className="link-btn">
                 Mark all read
               </button>
-              <Link href="/notifications" style={{ color: "#1a7f37", fontSize: "0.85rem" }}>
+              <Link href="/notifications" className="link-btn">
                 View all
               </Link>
             </span>
           </div>
           {recent.length === 0 ? (
-            <p style={{ padding: 16, color: "#666", margin: 0 }}>No notifications yet.</p>
+            <p className="muted small" style={{ padding: 20, textAlign: "center" }}>
+              No notifications yet.
+            </p>
           ) : (
             recent.map((n) => (
               <NotificationItem

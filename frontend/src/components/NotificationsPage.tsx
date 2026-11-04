@@ -3,13 +3,14 @@
 // Full notification history page with pagination + mark-all-read. Reuses the
 // shared SSE hook so new notifications stream in live.
 
-import Link from "next/link";
+import AppShell from "@/components/AppShell";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import RequireAuth from "@/components/RequireAuth";
 import { useNotifications } from "@/lib/notifications";
 import type { NotificationResponse } from "@/lib/api";
+import { Icon } from "@/components/ui";
 
 function timeAgo(iso: string): string {
   const then = new Date(iso).getTime();
@@ -23,21 +24,28 @@ function timeAgo(iso: string): string {
   return `${days} days ago`;
 }
 
-function iconFor(type: string): string {
+function iconFor(type: string): React.ReactNode {
   switch (type) {
     case "join_request":
-      return "👋";
+      return <Icon.Users size={17} />;
     case "join_approved":
-      return "✅";
+      return <Icon.Check size={17} />;
     case "join_denied":
-      return "🚫";
+      return <Icon.X size={17} />;
     case "photo_matched":
-      return "📷";
+      return <Icon.Images size={17} />;
     case "photo_processed":
-      return "⚙️";
+      return <Icon.Upload size={17} />;
     default:
-      return "🔔";
+      return <Icon.Bell size={17} />;
   }
+}
+
+function iconTone(type: string): React.CSSProperties {
+  if (type === "photo_matched") return { background: "var(--accent-soft)", color: "var(--accent)" };
+  if (type === "join_approved") return { background: "var(--ok-soft)", color: "var(--ok)" };
+  if (type === "join_denied") return { background: "var(--danger-soft)", color: "var(--danger)" };
+  return {};
 }
 
 function subjectHref(n: NotificationResponse): string {
@@ -59,98 +67,60 @@ function NotificationsContent() {
   }
 
   return (
-    <main style={{ padding: 40, maxWidth: 720, margin: "0 auto" }}>
-      <p>
-        <Link href="/dashboard">← Dashboard</Link>
-      </p>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginTop: 8,
-        }}
-      >
-        <h1 style={{ margin: 0 }}>Notifications</h1>
-        <button
-          type="button"
-          onClick={markAllRead}
-          style={{
-            border: "1px solid #e2e2e2",
-            background: "#fff",
-            borderRadius: 6,
-            padding: "6px 12px",
-            cursor: "pointer",
-          }}
-        >
-          Mark all read
-        </button>
-      </div>
-
-      <div style={{ display: "flex", gap: 8, margin: "16px 0" }}>
-        {(["all", "unread"] as const).map((f) => (
-          <button
-            key={f}
-            type="button"
-            onClick={() => setReadFilter(f)}
-            style={{
-              border: "1px solid #e2e2e2",
-              background: readFilter === f ? "#eef4ff" : "#fff",
-              borderRadius: 20,
-              padding: "4px 14px",
-              cursor: "pointer",
-              fontWeight: readFilter === f ? 700 : 400,
-            }}
-          >
-            {f === "all" ? "All" : "Unread"}
+    <AppShell showBell={false}>
+      <div style={{ maxWidth: 760, margin: "0 auto" }}>
+        <div className="page-head">
+          <div>
+            <span className="eyebrow">Inbox</span>
+            <h1 className="h1">Notifications</h1>
+          </div>
+          <button type="button" onClick={markAllRead} className="btn btn-sm">
+            <Icon.Check size={15} /> Mark all read
           </button>
-        ))}
-      </div>
+        </div>
 
-      {shown.length === 0 ? (
-        <p style={{ color: "#666" }}>No {readFilter === "unread" ? "unread " : ""}notifications.</p>
-      ) : (
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-          {shown.map((n) => (
-            <li
-              key={n.id}
-              onClick={() => handleNavigate(n)}
-              style={{
-                display: "flex",
-                gap: 12,
-                alignItems: "flex-start",
-                padding: 12,
-                borderBottom: "1px solid #eee",
-                borderRadius: 8,
-                background: n.is_read ? "transparent" : "#f4f8ff",
-                cursor: "pointer",
-              }}
+        <div className="segmented" style={{ marginBottom: 16 }}>
+          {(["all", "unread"] as const).map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setReadFilter(f)}
+              className={readFilter === f ? "active" : ""}
             >
-              <span style={{ fontSize: "1.3rem" }}>{iconFor(n.type)}</span>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600 }}>{n.title}</div>
-                <div style={{ color: "#555", marginTop: 2 }}>{n.body}</div>
-                <div style={{ color: "#999", fontSize: "0.8rem", marginTop: 4 }}>
-                  {timeAgo(n.created_at)}
-                </div>
-              </div>
-              {!n.is_read && (
-                <span
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: "50%",
-                    background: "#1a7f37",
-                    flexShrink: 0,
-                    marginTop: 6,
-                  }}
-                />
-              )}
-            </li>
+              {f === "all" ? "All" : "Unread"}
+            </button>
           ))}
-        </ul>
-      )}
-    </main>
+        </div>
+
+        {shown.length === 0 ? (
+          <div className="empty">
+            <Icon.Bell size={28} />
+            <span>No {readFilter === "unread" ? "unread " : ""}notifications.</span>
+          </div>
+        ) : (
+          <div className="notif-list">
+            {shown.map((n) => (
+              <button
+                key={n.id}
+                type="button"
+                onClick={() => handleNavigate(n)}
+                className={`notif${n.is_read ? "" : " unread"}`}
+              >
+                <span className="notif-icon" style={iconTone(n.type)}>
+                  {iconFor(n.type)}
+                </span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span className="notif-title">{n.title}</span>
+                  <span className="notif-body">{n.body}</span>
+                  <span className="notif-time">{timeAgo(n.created_at)}</span>
+                </span>
+                {!n.is_read && <span className="unread-dot" />}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </AppShell>
   );
 }
 

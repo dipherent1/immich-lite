@@ -1,22 +1,25 @@
 "use client";
 
-import Link from "next/link";
-
+import AppShell from "@/components/AppShell";
 import MatchesGrid from "@/components/MatchesGrid";
 import RequireAuth from "@/components/RequireAuth";
 
 function MatchesContent() {
   return (
-    <main style={{ padding: 40 }}>
-      <p>
-        <Link href="/dashboard">← Dashboard</Link>
-      </p>
-      <h1 style={{ marginTop: 8 }}>Matched photos</h1>
-      <p style={{ color: "#666" }}>
-        Photos from events you attended where your face was found.
-      </p>
+    <AppShell>
+      <div className="page-head">
+        <div>
+          <span className="eyebrow">Your gallery</span>
+          <h1 className="h1">
+            Photos that <span className="accent-text">found you</span>
+          </h1>
+          <p className="muted" style={{ marginTop: 8 }}>
+            Shots from events you attended where your face was recognised.
+          </p>
+        </div>
+      </div>
       <MatchesGrid />
-    </main>
+    </AppShell>
   );
 }
 

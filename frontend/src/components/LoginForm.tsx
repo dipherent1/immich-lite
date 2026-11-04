@@ -30,34 +30,59 @@ export default function LoginForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12, maxWidth: 320 }}>
-      <h1>Log in</h1>
-      <label>
-        Email
+    <form onSubmit={handleSubmit} className="auth-form">
+      <div style={{ display: "grid", gap: 8 }}>
+        <span className="eyebrow">Welcome back</span>
+        <h1 className="h1">Log in</h1>
+        <p className="muted">Pick up where you left off — your matches are waiting.</p>
+      </div>
+
+      <div className="field">
+        <label className="label" htmlFor="login-email">
+          Email
+        </label>
         <input
+          id="login-email"
+          className="input"
           type="email"
           required
+          autoComplete="email"
+          placeholder="you@example.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          style={{ width: "100%" }}
         />
-      </label>
-      <label>
-        Password
+      </div>
+
+      <div className="field">
+        <label className="label" htmlFor="login-password">
+          Password
+        </label>
         <input
+          id="login-password"
+          className="input"
           type="password"
           required
+          autoComplete="current-password"
+          placeholder="••••••••"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          style={{ width: "100%" }}
         />
-      </label>
-      {error && <p style={{ color: "red" }}>{error}</p>}
-      <button type="submit" disabled={submitting}>
-        {submitting ? "Logging in…" : "Log in"}
+      </div>
+
+      {error && <p className="alert alert-error">{error}</p>}
+
+      <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={submitting}>
+        {submitting ? (
+          <>
+            <span className="spinner" /> Logging in…
+          </>
+        ) : (
+          "Log in"
+        )}
       </button>
-      <p>
-        No account? <a href="/register">Register</a>
+
+      <p className="auth-switch">
+        No account? <a href="/register">Create one</a>
       </p>
     </form>
   );
