@@ -6,10 +6,14 @@ import { Icon } from "@/components/ui";
 import { ApiError, getMe, scanFace } from "@/lib/api";
 
 const POSES = [
-  { id: "front", label: "Front", text: "Face the camera" },
-  { id: "left", label: "Left", text: "Turn head slightly left" },
-  { id: "right", label: "Right", text: "Turn head slightly right" },
-];
+  { id: "front", label: "Front", title: "First, look straight ahead", text: "Hold still" },
+  { id: "left", label: "Left", title: "Next, look to your left", text: "Turn your head slowly" },
+  { id: "right", label: "Right", title: "Now look to your right", text: "Turn your head slowly" },
+] as const;
+
+// Progress ring geometry (SVG units).
+const RING_R = 48;
+const RING_C = 2 * Math.PI * RING_R;
 
 interface Capture {
   file: File;
@@ -208,26 +212,49 @@ export default function FaceScan() {
         <span className="muted small">{Math.min(captures.length, 3)} / 3</span>
       </div>
 
-      <div className="pose-steps">
-        {POSES.map((p, i) => {
-          const captured = captures.length > i;
-          const active = captures.length === i;
-          return (
-            <div key={p.id} className={`pose${captured ? " done" : active ? " active" : ""}`}>
-              {captured && <Icon.Check size={14} />}
-              {p.label}
-            </div>
-          );
-        })}
-      </div>
+      <div className="face-scan">
+        <div className="face-circle">
+          <video ref={videoRef} autoPlay playsInline muted />
 
-      <div className="camera">
-        <video ref={videoRef} autoPlay playsInline muted />
-        <div className="frame" />
-        <div className="prompt">
-          {captures.length < 3
-            ? `${POSES[captures.length].label}: ${POSES[captures.length].text}`
-            : "All captured — storing…"}
+          {/* Direction cue for the current pose (left / right only). */}
+          {captures.length < 3 && POSES[captures.length].id !== "front" && (
+            <svg
+              key={POSES[captures.length].id}
+              className={`face-arrow ${POSES[captures.length].id}`}
+              viewBox="0 0 100 20"
+              aria-hidden
+            >
+              <path d="M88 10H12M24 2 12 10l12 8" />
+            </svg>
+          )}
+
+          <svg className="face-ring" viewBox="0 0 100 100" aria-hidden>
+            <circle cx="50" cy="50" r={RING_R} className="track" />
+            <circle
+              cx="50"
+              cy="50"
+              r={RING_R}
+              className="progress"
+              strokeDasharray={RING_C}
+              strokeDashoffset={RING_C * (1 - Math.min(captures.length, 3) / 3)}
+            />
+          </svg>
+        </div>
+
+        <div className="face-copy" aria-live="polite">
+          <strong>
+            {captures.length < 3 ? POSES[captures.length].title : "All set — saving your face…"}
+          </strong>
+          <span>{captures.length < 3 ? POSES[captures.length].text : "This takes a second"}</span>
+        </div>
+
+        <div className="face-dots" aria-hidden>
+          {POSES.map((p, i) => (
+            <span
+              key={p.id}
+              className={captures.length > i ? "done" : captures.length === i ? "active" : ""}
+            />
+          ))}
         </div>
       </div>
       <canvas ref={canvasRef} style={{ display: "none" }} />
