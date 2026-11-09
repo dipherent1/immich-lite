@@ -28,44 +28,75 @@ export default function RegisterForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12, maxWidth: 320 }}>
-      <h1>Register</h1>
-      <label>
-        Display name
+    <form onSubmit={handleSubmit} className="auth-form">
+      <div style={{ display: "grid", gap: 8 }}>
+        <span className="eyebrow">Get started</span>
+        <h1 className="h1">Create account</h1>
+        <p className="muted">Takes a minute. Then scan your face and you&apos;re set.</p>
+      </div>
+
+      <div className="field">
+        <label className="label" htmlFor="reg-name">
+          Display name
+        </label>
         <input
+          id="reg-name"
+          className="input"
           type="text"
           required
+          autoComplete="name"
+          placeholder="What should we call you?"
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
-          style={{ width: "100%" }}
         />
-      </label>
-      <label>
-        Email
+      </div>
+
+      <div className="field">
+        <label className="label" htmlFor="reg-email">
+          Email
+        </label>
         <input
+          id="reg-email"
+          className="input"
           type="email"
           required
+          autoComplete="email"
+          placeholder="you@example.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          style={{ width: "100%" }}
         />
-      </label>
-      <label>
-        Password
+      </div>
+
+      <div className="field">
+        <label className="label" htmlFor="reg-password">
+          Password
+        </label>
         <input
+          id="reg-password"
+          className="input"
           type="password"
           required
           minLength={8}
+          autoComplete="new-password"
+          placeholder="At least 8 characters"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          style={{ width: "100%" }}
         />
-      </label>
-      {error && <p style={{ color: "red" }}>{error}</p>}
-      <button type="submit" disabled={submitting}>
-        {submitting ? "Creating account…" : "Register"}
+      </div>
+
+      {error && <p className="alert alert-error">{error}</p>}
+
+      <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={submitting}>
+        {submitting ? (
+          <>
+            <span className="spinner" /> Creating account…
+          </>
+        ) : (
+          "Create account"
+        )}
       </button>
-      <p>
+
+      <p className="auth-switch">
         Have an account? <a href="/login">Log in</a>
       </p>
     </form>

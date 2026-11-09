@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -8,6 +9,7 @@ import {
   getMyMatches,
   type MatchFeedItemResponse,
 } from "@/lib/api";
+import { Icon } from "@/components/ui";
 
 const PAGE_SIZE = 24;
 
@@ -16,14 +18,6 @@ interface PageResult {
   has_more: boolean;
   next_offset: number;
 }
-
-const tileStyle: React.CSSProperties = {
-  position: "relative",
-  aspectRatio: "1 / 1",
-  overflow: "hidden",
-  borderRadius: 8,
-  background: "#f0f0f0",
-};
 
 function similarityLabel(value: number): string {
   const pct = Math.round(value * 100);
@@ -110,66 +104,47 @@ export default function MatchesGrid({ refreshKey = 0 }: { refreshKey?: number })
   }
 
   return (
-    <section style={{ marginTop: 24 }}>
-      <h2 style={{ fontSize: 20, fontWeight: 600 }}>Your matches</h2>
-      {error && <p style={{ color: "#cf222e" }}>{error}</p>}
+    <section>
+      {error && <p className="alert alert-error">{error}</p>}
+      {loading && !error && (
+        <div className="photo-grid">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="photo">
+              <div className="photo-placeholder" />
+            </div>
+          ))}
+        </div>
+      )}
       {!error && items.length === 0 && !loading && (
-        <p style={{ color: "#666" }}>
-          No matched photos yet. Photos containing your face will appear here.
-        </p>
+        <div className="empty" style={{ padding: "72px 24px" }}>
+          <span className="scan-ring missing">
+            <Icon.Face size={30} />
+          </span>
+          <strong style={{ color: "var(--text)", fontSize: "1.05rem" }}>No matches yet</strong>
+          <span style={{ maxWidth: 360 }}>
+            When photos with your face are uploaded to events you&apos;ve joined, they&apos;ll
+            show up here.
+          </span>
+          <Link href="/dashboard" className="btn btn-sm" style={{ marginTop: 6 }}>
+            Go to dashboard
+          </Link>
+        </div>
       )}
       {items.length > 0 && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-            gap: 12,
-            marginTop: 12,
-          }}
-        >
+        <div className="photo-grid">
           {items.map((item) => {
             const url = urls[item.photo_id];
             return (
-              <div key={item.photo_id} style={tileStyle}>
+              <div key={item.photo_id} className="photo">
                 {url ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={url}
-                    alt={`Matched photo from ${item.event_name}`}
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                    loading="lazy"
-                  />
+                  <img src={url} alt={`Matched photo from ${item.event_name}`} loading="lazy" />
                 ) : (
-                  <div
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: "#888",
-                      fontSize: "0.8rem",
-                      textAlign: "center",
-                      padding: 8,
-                    }}
-                  >
-                    Loading…
-                  </div>
+                  <div className="photo-placeholder" />
                 )}
-                <div
-                  style={{
-                    position: "absolute",
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    padding: "10px 8px 6px",
-                    background: "linear-gradient(transparent, rgba(0,0,0,0.7))",
-                    color: "#fff",
-                    fontSize: "0.75rem",
-                  }}
-                >
-                  <div style={{ fontWeight: 600 }}>{item.event_name}</div>
-                  <div>{similarityLabel(item.similarity)} match</div>
+                <div className="photo-overlay">
+                  <span className="event-label">{item.event_name}</span>
+                  <span className="match-score">{similarityLabel(item.similarity)}</span>
                 </div>
               </div>
             );
@@ -177,13 +152,17 @@ export default function MatchesGrid({ refreshKey = 0 }: { refreshKey?: number })
         </div>
       )}
       {hasMore && (
-        <button
-          onClick={loadMore}
-          disabled={loadingMore}
-          style={{ marginTop: 16 }}
-        >
-          {loadingMore ? "Loading…" : "Load more"}
-        </button>
+        <div className="load-more">
+          <button className="btn" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? (
+              <>
+                <span className="spinner" /> Loading…
+              </>
+            ) : (
+              "Load more"
+            )}
+          </button>
+        </div>
       )}
     </section>
   );

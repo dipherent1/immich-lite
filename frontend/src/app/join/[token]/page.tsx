@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore } from "react";
 
+import { Brand, Icon } from "@/components/ui";
 import { ApiError, isAuthenticated, joinEvent } from "@/lib/api";
 
 function subscribe() {
@@ -50,33 +51,58 @@ export default function JoinPage() {
 
   const loginHref = `/login?next=${encodeURIComponent(`/join/${token}`)}`;
 
-  if (authed === false) {
-    return (
-      <main style={{ padding: 40, maxWidth: 520 }}>
-        <h1>Join an event</h1>
-        <p>You need to be logged in to join this event.</p>
-        <p style={{ marginTop: 16 }}>
-          <Link href={loginHref}>Log in</Link>&nbsp;·&nbsp;
-          <Link href={`/register?next=${encodeURIComponent(`/join/${token}`)}`}>
-            Register
-          </Link>
-        </p>
-      </main>
-    );
-  }
-
   return (
-    <main style={{ padding: 40, maxWidth: 520 }}>
-      <h1>Join an event</h1>
-      {busy && authed ? <p>Joining…</p> : null}
-      {error && (
-        <>
-          <p style={{ margin: "16px 0", color: "#cf222e" }}>{error}</p>
-          <p>
-            <Link href="/dashboard">Back to your dashboard</Link>
-          </p>
-        </>
-      )}
+    <main className="center-page grain">
+      <div className="stars" />
+      <div
+        className="glow"
+        style={{
+          width: 520,
+          height: 520,
+          left: "50%",
+          top: "50%",
+          transform: "translate(-50%,-50%)",
+          background: "radial-gradient(circle, rgba(255,150,30,0.45), transparent 65%)",
+          zIndex: -1,
+        }}
+      />
+      <div className="center-card card">
+        <Brand />
+        <span className={`scan-ring ${error ? "error" : "missing"}`} style={{ marginTop: 8 }}>
+          {error ? <Icon.X size={30} /> : authed === false ? <Icon.Ticket size={30} /> : <span className="spinner" />}
+        </span>
+        <h1 className="h1" style={{ fontSize: "1.8rem" }}>
+          {error ? "Couldn't join" : authed === false ? "You're invited" : "Joining event…"}
+        </h1>
+
+        {authed === false && (
+          <>
+            <p className="muted">Log in or create an account to join this event and get your photos.</p>
+            <div className="row" style={{ justifyContent: "center", marginTop: 4 }}>
+              <Link href={loginHref} className="btn btn-primary">
+                Log in
+              </Link>
+              <Link
+                href={`/register?next=${encodeURIComponent(`/join/${token}`)}`}
+                className="btn"
+              >
+                Create account
+              </Link>
+            </div>
+          </>
+        )}
+
+        {busy && authed && !error ? <p className="muted">Hang tight, adding you to the guest list.</p> : null}
+
+        {error && (
+          <>
+            <p className="alert alert-error">{error}</p>
+            <Link href="/dashboard" className="btn">
+              Back to your dashboard
+            </Link>
+          </>
+        )}
+      </div>
     </main>
   );
 }

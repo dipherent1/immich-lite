@@ -8,6 +8,7 @@ import {
   getEventPhotos,
   type PhotoResponse,
 } from "@/lib/api";
+import { Icon } from "@/components/ui";
 
 const PAGE_SIZE = 24;
 
@@ -16,14 +17,6 @@ interface PageResult {
   has_more: boolean;
   next_offset: number;
 }
-
-const tileStyle: React.CSSProperties = {
-  position: "relative",
-  aspectRatio: "1 / 1",
-  overflow: "hidden",
-  borderRadius: 8,
-  background: "#f0f0f0",
-};
 
 /**
  * Reusable, self-contained paginated grid of an event's uploaded photos.
@@ -132,49 +125,41 @@ export default function PhotoGrid({
   };
 
   return (
-    <section style={{ marginTop: 24 }}>
-      <h2 style={{ fontSize: 20, fontWeight: 600 }}>Photos</h2>
-      {error && <p style={{ color: "#cf222e" }}>{error}</p>}
+    <section style={{ marginTop: 32 }}>
+      <div className="spread" style={{ marginBottom: 16 }}>
+        <h2 className="h2">Photos</h2>
+        {photos.length > 0 && <span className="muted small">{photos.length} loaded</span>}
+      </div>
+      {error && <p className="alert alert-error">{error}</p>}
+      {loading && !error && (
+        <div className="photo-grid">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="photo">
+              <div className="photo-placeholder" />
+            </div>
+          ))}
+        </div>
+      )}
       {!error && photos.length === 0 && !loading && (
-        <p style={{ color: "#666" }}>No photos uploaded yet.</p>
+        <div className="empty">
+          <Icon.Images size={30} />
+          <span>No photos uploaded yet.</span>
+        </div>
       )}
       {photos.length > 0 && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-            gap: 12,
-            marginTop: 12,
-          }}
-        >
+        <div className="photo-grid">
           {photos.map((photo) => {
             const url = urls[photo.id];
             const ready = url != null && photo.status === "processed";
             return (
-              <div key={photo.id} style={tileStyle}>
+              <div key={photo.id} className="photo">
                 {ready ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={url}
-                    alt="Event photo"
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                    loading="lazy"
-                  />
+                  <img src={url} alt="Event photo" loading="lazy" />
                 ) : (
-                  <div
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: "#888",
-                      fontSize: "0.8rem",
-                      textAlign: "center",
-                      padding: 8,
-                    }}
-                  >
-                    {statusLabel[photo.status] ?? "Pending"}
+                  <div className={`photo-placeholder${photo.status === "failed" ? " failed" : ""}`}>
+                    {photo.status !== "failed" && <span className="spinner" />}
+                    {statusLabel[photo.status] ?? "Loading…"}
                   </div>
                 )}
               </div>
@@ -183,13 +168,17 @@ export default function PhotoGrid({
         </div>
       )}
       {hasMore && (
-        <button
-          onClick={loadMore}
-          disabled={loadingMore}
-          style={{ marginTop: 16 }}
-        >
-          {loadingMore ? "Loading…" : "Load more"}
-        </button>
+        <div className="load-more">
+          <button className="btn" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? (
+              <>
+                <span className="spinner" /> Loading…
+              </>
+            ) : (
+              "Load more"
+            )}
+          </button>
+        </div>
       )}
     </section>
   );

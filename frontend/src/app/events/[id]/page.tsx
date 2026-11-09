@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import AppShell from "@/components/AppShell";
 import RequireAuth from "@/components/RequireAuth";
+import { Icon } from "@/components/ui";
 import PhotoGrid from "@/components/PhotoGrid";
 import {
   ApiError,
@@ -145,249 +147,259 @@ function EventPreviewContent() {
     }
   }
 
-  const styles = {
-    card: {
-      border: "1px solid #e2e2e2",
-      borderRadius: 8,
-      padding: 16,
-      maxWidth: 520,
-    } as const,
-    muted: { color: "#666", margin: "6px 0" } as const,
-    badge: (active: boolean) => ({
-      display: "inline-block",
-      padding: "2px 10px",
-      borderRadius: 12,
-      fontSize: "0.8rem",
-      fontWeight: 600,
-      background: active ? "#e6f6ee" : "#f1f1f1",
-      color: active ? "#1a7f37" : "#666",
-    }),
-  } as const;
+  const [copied, setCopied] = useState(false);
+
+  async function copyWithFeedback(token: string) {
+    await copyLink(token);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  }
+
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
 
   return (
-    <main style={{ padding: 40 }}>
-      <p>
-        <Link href="/dashboard">← Dashboard</Link>
-      </p>
+    <AppShell>
+      <Link href="/dashboard" className="back-link" style={{ marginBottom: 20 }}>
+        <Icon.ArrowLeft size={16} /> Dashboard
+      </Link>
 
-      {error && <p style={{ color: "#cf222e" }}>{error}</p>}
+      {error && (
+        <p className="alert alert-error" style={{ marginTop: 16 }}>
+          {error}
+        </p>
+      )}
 
-      {!event && !error ? <p>Loading event…</p> : null}
+      {!event && !error ? (
+        <div className="row muted" style={{ marginTop: 24 }}>
+          <span className="spinner" /> Loading event…
+        </div>
+      ) : null}
 
       {event && (
         <>
-          <h1 style={{ marginTop: 8 }}>{event.name}</h1>
-          <p>
-            {event.expires_at ? (
-              <span style={styles.badge(event.active)}>
-                {event.active ? "Open" : "Closed"}
-              </span>
-            ) : (
-              <span style={styles.badge(true)}>Open (no end)</span>
-            )}
-          </p>
+          <section className="event-hero grain" style={{ marginTop: 16 }}>
+            <div className="stars" />
+            <div className="row" style={{ justifyContent: "center", position: "relative" }}>
+              {event.expires_at ? (
+                <span className={`badge ${event.active ? "badge-open" : "badge-closed"}`}>
+                  {event.active ? "Open" : "Closed"}
+                </span>
+              ) : (
+                <span className="badge badge-open">Open · no end</span>
+              )}
+              {event.is_owner && <span className="badge">You&apos;re the host</span>}
+            </div>
+            <h1 className="display" style={{ position: "relative" }}>
+              {event.name}
+            </h1>
+            <p className="muted" style={{ position: "relative" }}>
+              Starts {fmt(event.starts_at)}
+            </p>
+          </section>
 
-          <dl style={{ marginTop: 16 }}>
-            <dt style={{ fontWeight: 600 }}>Created</dt>
-            <dd style={{ margin: "0 0 12px" }}>
-              {new Date(event.created_at).toLocaleString()}
-            </dd>
-            <dt style={{ fontWeight: 600 }}>Starts</dt>
-            <dd style={{ margin: "0 0 12px" }}>
-              {new Date(event.starts_at).toLocaleString()}
-            </dd>
-            <dt style={{ fontWeight: 600 }}>Closes</dt>
-            <dd style={{ margin: "0 0 12px" }}>
-              {event.expires_at
-                ? new Date(event.expires_at).toLocaleString()
-                : "No closing time set"}
-            </dd>
-            <dt style={{ fontWeight: 600 }}>Attendees</dt>
-            <dd style={{ margin: "0 0 12px" }}>
-              {event.attendee_count}
-            </dd>
-          </dl>
-
-          <div style={{ marginTop: 16, ...styles.card }}>
-            <p style={{ margin: 0, fontWeight: 600 }}>Invite link</p>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
-              <code
-                style={{
-                  background: "#f4f4f4",
-                  padding: "6px 8px",
-                  borderRadius: 6,
-                  flex: 1,
-                  fontSize: "0.85rem",
-                  wordBreak: "break-all",
-                }}
-              >
-                {joinLinkFor(event.join_token)}
-              </code>
-              <button onClick={() => copyLink(event.join_token)}>Copy</button>
+          <div className="facts">
+            <div className="fact">
+              <div className="fact-label">
+                <Icon.Users size={13} /> Attendees
+              </div>
+              <div className="fact-value big">{event.attendee_count}</div>
+            </div>
+            <div className="fact">
+              <div className="fact-label">
+                <Icon.Calendar size={13} /> Starts
+              </div>
+              <div className="fact-value">{fmt(event.starts_at)}</div>
+            </div>
+            <div className="fact">
+              <div className="fact-label">
+                <Icon.Clock size={13} /> Closes
+              </div>
+              <div className="fact-value">
+                {event.expires_at ? fmt(event.expires_at) : "No closing time"}
+              </div>
+            </div>
+            <div className="fact">
+              <div className="fact-label">
+                <Icon.Plus size={13} /> Created
+              </div>
+              <div className="fact-value">{fmt(event.created_at)}</div>
             </div>
           </div>
 
-<div style={{ marginTop: 24 }}>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                disabled={uploading}
-                onChange={(e) => {
-                  onFilesSelected(e.target.files);
-                  // Allow re-selecting the same file(s) after an upload.
-                  e.target.value = "";
-                }}
-                style={{ maxWidth: 260 }}
-              />
+          <div className="grid-2">
+            {/* Upload */}
+            <section className="card">
+              <div className="card-header">
+                <h2 className="h2">Add photos</h2>
+                {selected.length > 0 && (
+                  <span className="muted small">{selected.length} ready</span>
+                )}
+              </div>
+
+              <label className={`dropzone${uploading ? " disabled" : ""}`}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  disabled={uploading}
+                  onChange={(e) => {
+                    onFilesSelected(e.target.files);
+                    // Allow re-selecting the same file(s) after an upload.
+                    e.target.value = "";
+                  }}
+                />
+                <span className="tile-icon">
+                  <Icon.Upload size={22} />
+                </span>
+                <strong>Choose photos</strong>
+                <span className="muted small">
+                  JPG or PNG, up to 20 MB each. We&apos;ll match faces automatically.
+                </span>
+              </label>
+
+              {selected.length > 0 && (
+                <div className="queue">
+                  {selected.map((img, i) => (
+                    <div key={img.url} className="queue-item">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={img.url} alt={`Selected photo ${i + 1}`} />
+                      <button
+                        type="button"
+                        aria-label={`Remove photo ${i + 1}`}
+                        onClick={() => removeSelected(i)}
+                      >
+                        <Icon.X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <button
                 type="button"
+                className="btn btn-primary btn-block"
+                style={{ marginTop: 14 }}
                 disabled={uploading || selected.length === 0}
                 onClick={onUploadSelected}
               >
-                {uploading
-                  ? "Uploading…"
-                  : selected.length === 0
-                    ? "Upload photos"
-                    : `Upload ${selected.length} ${
-                        selected.length === 1 ? "photo" : "photos"
-                      }`}
+                {uploading ? (
+                  <>
+                    <span className="spinner" /> Uploading…
+                  </>
+                ) : selected.length === 0 ? (
+                  "Upload photos"
+                ) : (
+                  `Upload ${selected.length} ${selected.length === 1 ? "photo" : "photos"}`
+                )}
               </button>
-            </div>
-            <p style={{ color: "#666", margin: "8px 0 0" }}>
-              {selected.length > 0
-                ? `${selected.length} file${selected.length === 1 ? "" : "s"} ready — click Upload, or press × on a thumbnail to cancel it.`
-                : "Choose one or more photos to upload."}
-            </p>
-            {selected.length > 0 && (
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))",
-                  gap: 8,
-                  marginTop: 12,
-                  maxWidth: 520,
-                }}
-              >
-                {selected.map((img, i) => (
-                  <div
-                    key={img.url}
-                    style={{
-                      position: "relative",
-                      aspectRatio: "1 / 1",
-                      overflow: "hidden",
-                      borderRadius: 6,
-                      background: "#f0f0f0",
-                    }}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={img.url}
-                      alt={`Selected photo ${i + 1}`}
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                      }}
-                    />
-                    <button
-                      type="button"
-                      aria-label={`Remove photo ${i + 1}`}
-                      onClick={() => removeSelected(i)}
-                      style={{
-                        position: "absolute",
-                        top: 2,
-                        right: 2,
-                        width: 20,
-                        height: 20,
-                        borderRadius: "50%",
-                        border: "none",
-                        background: "rgba(0, 0, 0, 0.65)",
-                        color: "#fff",
-                        fontSize: 12,
-                        lineHeight: 1,
-                        cursor: "pointer",
-                      }}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            {uploadNote && (
-              <p
-                style={{
-                  color: uploadNote.includes("failed") ? "#cf222e" : "#1a7f37",
-                  margin: "8px 0 0",
-                }}
-              >
-                {uploadNote}
-              </p>
-            )}
-          </div>
 
-          {event.is_owner && (
-            <div style={{ marginTop: 24, border: "1px solid #ddd", borderRadius: 8, padding: 16, maxWidth: 520 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 600, marginTop: 0 }}>
-                Join requests
-                {joinRequests.length > 0 && ` (${joinRequests.length} pending)`}
-              </h2>
-              {requestsNote && (
-                <p style={{ color: requestsNote.startsWith("Could") ? "#cf222e" : "#1a7f37", margin: "8px 0" }}>
-                  {requestsNote}
+              {uploadNote && (
+                <p
+                  className={`alert ${uploadNote.includes("failed") ? "alert-error" : "alert-ok"}`}
+                  style={{ marginTop: 12 }}
+                >
+                  {uploadNote}
                 </p>
               )}
-              {joinRequests.length === 0 ? (
-                <p style={{ color: "#666", margin: 0 }}>No pending join requests.</p>
-              ) : (
-                <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                  {joinRequests.map((req) => (
-                    <li
-                      key={req.id}
-                      style={{
-                        display: "flex",
-                        gap: 10,
-                        alignItems: "center",
-                        padding: "10px 0",
-                        borderBottom: "1px solid #eee",
-                        justifyContent: "space-between",
-                      }}
+            </section>
+
+            <div className="stack">
+              {/* Invite */}
+              <section className="card">
+                <div className="card-header">
+                  <h2 className="h2">Invite people</h2>
+                  <Icon.Link />
+                </div>
+                <div className="input-group">
+                  <code className="code-chip">{joinLinkFor(event.join_token)}</code>
+                  <button className="btn btn-sm" onClick={() => copyWithFeedback(event.join_token)}>
+                    {copied ? (
+                      <>
+                        <Icon.Check size={15} /> Copied
+                      </>
+                    ) : (
+                      <>
+                        <Icon.Copy size={15} /> Copy
+                      </>
+                    )}
+                  </button>
+                </div>
+                <p className="hint" style={{ marginTop: 10 }}>
+                  Anyone with this link can join while the event is open.
+                </p>
+              </section>
+
+              {/* Join requests */}
+              {event.is_owner && (
+                <section className="card">
+                  <div className="card-header">
+                    <h2 className="h2">Join requests</h2>
+                    {joinRequests.length > 0 && (
+                      <span className="badge" style={{ color: "var(--accent)", background: "var(--accent-soft)" }}>
+                        {joinRequests.length} pending
+                      </span>
+                    )}
+                  </div>
+                  {requestsNote && (
+                    <p
+                      className={`alert ${requestsNote.startsWith("Could") ? "alert-error" : "alert-ok"}`}
+                      style={{ marginBottom: 12 }}
                     >
-                      <div>
-                        <strong>{req.requester_name}</strong>
-                        <p style={{ margin: "2px 0 0", color: "#666", fontSize: "0.85rem" }}>
-                          Requested {new Date(req.created_at).toLocaleString()}
-                        </p>
-                      </div>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button
-                          type="button"
-                          onClick={() => handleApprove(req.id)}
-                          style={{ cursor: "pointer", padding: "4px 12px", background: "#e6f6ee", border: "1px solid #1a7f37", borderRadius: 6, color: "#1a7f37" }}
-                        >
-                          Approve
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeny(req.id)}
-                          style={{ cursor: "pointer", padding: "4px 12px", background: "#fff", border: "1px solid #cf222e", borderRadius: 6, color: "#cf222e" }}
-                        >
-                          Deny
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                      {requestsNote}
+                    </p>
+                  )}
+                  {joinRequests.length === 0 ? (
+                    <p className="muted small">No pending join requests.</p>
+                  ) : (
+                    <div>
+                      {joinRequests.map((req) => (
+                        <div key={req.id} className="request">
+                          <div className="row" style={{ flexWrap: "nowrap", minWidth: 0 }}>
+                            <span className="avatar" style={{ width: 34, height: 34, fontSize: "0.8rem" }}>
+                              {req.requester_name.trim()[0]?.toUpperCase() ?? "?"}
+                            </span>
+                            <div style={{ minWidth: 0 }}>
+                              <strong style={{ display: "block" }}>{req.requester_name}</strong>
+                              <span className="muted small">
+                                Requested {new Date(req.created_at).toLocaleString()}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="row" style={{ flexWrap: "nowrap" }}>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-ok"
+                              onClick={() => handleApprove(req.id)}
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-danger"
+                              onClick={() => handleDeny(req.id)}
+                            >
+                              Deny
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
               )}
             </div>
-          )}
+          </div>
 
           <PhotoGrid eventId={eventId} refreshKey={refreshKey} />
         </>
       )}
-    </main>
+    </AppShell>
   );
 }
 

@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+
+import { Icon } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -14,6 +16,34 @@ import {
   type EventPublicResponse,
   type EventResponse,
 } from "@/lib/api";
+
+const THUMBS = [
+  "linear-gradient(135deg,#ffc94d,#ff6a3d)",
+  "linear-gradient(135deg,#7fb2ff,#2d5fd1)",
+  "linear-gradient(135deg,#3ddc97,#16865a)",
+  "linear-gradient(135deg,#ff8a9a,#d1365a)",
+  "linear-gradient(135deg,#f4f2ee,#9a9893)",
+];
+
+/** Stable gradient + initial for an event "cover" tile. */
+function thumbFor(name: string) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return { background: THUMBS[h % THUMBS.length], letter: name.trim()[0]?.toUpperCase() ?? "?" };
+}
+
+function closesLabel(expires: string | null): string {
+  return expires ? `Closes ${new Date(expires).toLocaleString()}` : "No closing time";
+}
+
+function StatusBadge({ active, expires }: { active: boolean; expires: string | null }) {
+  if (!expires) return <span className="badge badge-open">Open</span>;
+  return (
+    <span className={`badge ${active ? "badge-open" : "badge-closed"}`}>
+      {active ? "Open" : "Closed"}
+    </span>
+  );
+}
 
 function joinLinkFor(token: string): string {
   return `${window.location.origin}/join/${token}`;
@@ -33,7 +63,7 @@ function extractToken(input: string): string {
  *   - Search public events by name (results intentionally carry no token).
  *   - Join via a shared link/token.
  */
-export default function EventsView() {
+export default function EventsView({ leading }: { leading?: React.ReactNode }) {
   const router = useRouter();
   const [mine, setMine] = useState<EventResponse[] | null>(null);
   const [mineError, setMineError] = useState<string | null>(null);
@@ -156,215 +186,240 @@ export default function EventsView() {
     [mine],
   );
 
-  const styles = {
-    section: {
-      marginTop: 24,
-      border: "1px solid #ddd",
-      borderRadius: 8,
-      padding: 16,
-      maxWidth: 640,
-    } as const,
-    title: { marginTop: 0, fontSize: "1.1rem" } as const,
-    field: { display: "flex", flexDirection: "column" as const, gap: 6, marginBottom: 12 } as const,
-    label: { fontWeight: 600, fontSize: "0.85rem" } as const,
-    input: {
-      padding: 8,
-      borderRadius: 6,
-      border: "1px solid #ccc",
-      fontSize: "0.95rem",
-    } as const,
-    row: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" as const } as const,
-    card: {
-      border: "1px solid #e2e2e2",
-      borderRadius: 8,
-      padding: 12,
-      marginBottom: 10,
-    } as const,
-    error: { color: "#cf222e", margin: "8px 0 0" } as const,
-    ok: { color: "#1a7f37", margin: "8px 0 0", fontWeight: 600 } as const,
-    muted: { color: "#666", fontSize: "0.85rem", margin: "4px 0 0" } as const,
-    badge: (active: boolean) => ({
-      display: "inline-block",
-      padding: "2px 10px",
-      borderRadius: 12,
-      fontSize: "0.78rem",
-      fontWeight: 600,
-      background: active ? "#e6f6ee" : "#f1f1f1",
-      color: active ? "#1a7f37" : "#666",
-    }),
-  } as const;
+  const [copied, setCopied] = useState<string | null>(null);
+
+  async function copyWithFeedback(token: string) {
+    await copyLink(token);
+    setCopied(token);
+    setTimeout(() => setCopied((c) => (c === token ? null : c)), 1600);
+  }
 
   return (
-    <>
-      {/* Create */}
-      <section style={styles.section}>
-        <h2 style={styles.title}>Create an event</h2>
-        <form onSubmit={handleCreate}>
-          <div style={styles.field}>
-            <label style={styles.label} htmlFor="event-name">
-              Name
-            </label>
-            <input
-              id="event-name"
-              style={styles.input}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              placeholder="e.g. Birthday Bash"
-            />
-          </div>
-          <div style={styles.field}>
-            <label style={styles.label} htmlFor="event-expires">
-              Close after (optional)
-            </label>
-            <input
-              id="event-expires"
-              type="datetime-local"
-              style={styles.input}
-              value={expires}
-              onChange={(e) => setExpires(e.target.value)}
-            />
-            <span style={styles.muted}>
-              Leave empty to keep the event open. Once closed, the link stops
-              accepting new attendees.
+    <div className="grid-dash" id="events">
+      {/* Left column */}
+      <div className="stack">
+        {leading}
+
+        {/* Create */}
+        <section className="card">
+          <div className="card-header">
+            <h2 className="h2">Host an event</h2>
+            <span className="tile-icon" style={{ width: 36, height: 36, borderRadius: 10 }}>
+              <Icon.Plus />
             </span>
           </div>
-          <button type="submit" disabled={creating || !name.trim()}>
-            {creating ? "Creating…" : "Create event"}
-          </button>
-        </form>
-        {createError && <p style={styles.error}>{createError}</p>}
-      </section>
-
-      {/* My events */}
-      <section style={styles.section}>
-        <h2 style={styles.title}>
-          Your events{mine != null ? ` (${activeCount} active)` : ""}
-        </h2>
-        {mineError && <p style={styles.error}>{mineError}</p>}
-        {mine === null && !mineError ? <p style={styles.muted}>Loading…</p> : null}
-        {mine && mine.length === 0 ? (
-          <p style={styles.muted}>
-            You haven’t created or joined any events yet.
-          </p>
-        ) : null}
-        {mine?.map((ev) => (
-          <div key={ev.id} style={styles.card}>
-            <div style={{ ...styles.row, justifyContent: "space-between" }}>
-              <Link
-                href={`/events/${ev.id}`}
-                style={{ fontWeight: 600, textDecoration: "underline" }}
-              >
-                {ev.name}
-              </Link>
-              {ev.expires_at ? (
-                <span style={styles.badge(ev.active)}>
-                  {ev.active ? "Open" : "Closed"}
-                </span>
+          <form onSubmit={handleCreate} className="stack">
+            <div className="field">
+              <label className="label" htmlFor="event-name">
+                Event name
+              </label>
+              <input
+                id="event-name"
+                className="input"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                placeholder="e.g. Birthday Bash"
+              />
+            </div>
+            <div className="field">
+              <label className="label" htmlFor="event-expires">
+                Close after (optional)
+              </label>
+              <input
+                id="event-expires"
+                type="datetime-local"
+                className="input"
+                value={expires}
+                onChange={(e) => setExpires(e.target.value)}
+              />
+              <span className="hint">
+                Leave empty to keep it open. Once closed, the link stops accepting new
+                attendees.
+              </span>
+            </div>
+            <button type="submit" className="btn btn-primary" disabled={creating || !name.trim()}>
+              {creating ? (
+                <>
+                  <span className="spinner" /> Creating…
+                </>
               ) : (
-                <span style={styles.badge(true)}>Open (no end)</span>
+                <>
+                  Create event <Icon.Arrow />
+                </>
               )}
-            </div>
-            <p style={styles.muted}>
-              {ev.expires_at
-                ? `Closes ${new Date(ev.expires_at).toLocaleString()}`
-                : "No closing time set"}
+            </button>
+          </form>
+          {createError && (
+            <p className="alert alert-error" style={{ marginTop: 14 }}>
+              {createError}
             </p>
-            <div style={{ ...styles.row, marginTop: 6 }}>
-              <code
-                style={{
-                  background: "#f4f4f4",
-                  padding: "4px 6px",
-                  borderRadius: 6,
-                  fontSize: "0.8rem",
-                  flex: 1,
-                  wordBreak: "break-all",
-                }}
-              >
-                {joinLinkFor(ev.join_token)}
-              </code>
-              <button onClick={() => copyLink(ev.join_token)}>Copy</button>
-            </div>
+          )}
+        </section>
+
+        {/* Join */}
+        <section className="card">
+          <div className="card-header">
+            <h2 className="h2">Got an invite?</h2>
+            <span className="tile-icon" style={{ width: 36, height: 36, borderRadius: 10 }}>
+              <Icon.Link />
+            </span>
           </div>
-        ))}
-      </section>
-
-      {/* Search */}
-      <section style={styles.section}>
-        <h2 style={styles.title}>Search public events</h2>
-        <form onSubmit={handleSearch} style={{ ...styles.row }}>
-          <input
-            style={{ ...styles.input, flex: 1 }}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by name…"
-          />
-          <button type="submit" disabled={searching || !query.trim()}>
-            Search
-          </button>
-        </form>
-        {results.map((ev) => (
-          <div key={ev.id} style={styles.card}>
-            <div style={{ ...styles.row, justifyContent: "space-between" }}>
-              <span style={{ fontWeight: 600 }}>{ev.name}</span>
-              {ev.expires_at ? (
-                <span style={styles.badge(ev.active)}>
-                  {ev.active ? "Open" : "Closed"}
-                </span>
-              ) : (
-                <span style={styles.badge(true)}>Open</span>
-              )}
+          <form onSubmit={handleJoin} className="input-group">
+            <div className="input-icon">
+              <Icon.Link />
+              <input
+                className="input"
+                value={joinInput}
+                onChange={(e) => setJoinInput(e.target.value)}
+                placeholder="Paste a join link or token"
+              />
             </div>
-            <p style={styles.muted}>
-              {ev.expires_at
-                ? `Closes ${new Date(ev.expires_at).toLocaleString()}`
-                : "No closing time set"}
+            <button type="submit" className="btn btn-primary" disabled={joining || !joinInput.trim()}>
+              {joining ? "Joining…" : "Join"}
+            </button>
+          </form>
+          {joinMessage && (
+            <p
+              className={`alert ${joinMessage.ok ? "alert-ok" : "alert-error"}`}
+              style={{ marginTop: 14 }}
+            >
+              {joinMessage.text}
             </p>
-            {ev.active && (
-              <div style={{ marginTop: 8 }}>
+          )}
+        </section>
+      </div>
+
+      {/* Right column */}
+      <div className="stack">
+        {/* My events */}
+        <section className="card">
+          <div className="card-header">
+            <h2 className="h2">Your events</h2>
+            {mine != null && <span className="badge badge-open">{activeCount} active</span>}
+          </div>
+          {mineError && <p className="alert alert-error">{mineError}</p>}
+          {mine === null && !mineError ? (
+            <div className="row muted small">
+              <span className="spinner" /> Loading…
+            </div>
+          ) : null}
+          {mine && mine.length === 0 ? (
+            <div className="empty">
+              <Icon.Ticket size={28} />
+              <span>You haven&apos;t created or joined any events yet.</span>
+            </div>
+          ) : null}
+          {mine?.map((ev) => {
+            const t = thumbFor(ev.name);
+            return (
+              <div key={ev.id} className="event-row">
+                <Link href={`/events/${ev.id}`} className="event-thumb" style={{ background: t.background }}>
+                  {t.letter}
+                </Link>
+                <div style={{ minWidth: 0 }}>
+                  <div className="row" style={{ gap: 8, flexWrap: "nowrap" }}>
+                    <Link href={`/events/${ev.id}`} className="event-name">
+                      {ev.name}
+                    </Link>
+                    <StatusBadge active={ev.active} expires={ev.expires_at} />
+                  </div>
+                  <div className="meta">
+                    <span>
+                      <Icon.Clock size={13} /> {closesLabel(ev.expires_at)}
+                    </span>
+                  </div>
+                </div>
                 <button
                   type="button"
-                  onClick={() => handleRequestToJoin(ev.id)}
-                  disabled={requestingEvent === ev.id}
-                  style={{ padding: "6px 14px", cursor: "pointer" }}
+                  className="btn btn-sm"
+                  onClick={() => copyWithFeedback(ev.join_token)}
+                  title={joinLinkFor(ev.join_token)}
                 >
-                  {requestingEvent === ev.id ? "Requesting…" : "Request to join"}
+                  {copied === ev.join_token ? (
+                    <>
+                      <Icon.Check size={15} /> Copied
+                    </>
+                  ) : (
+                    <>
+                      <Icon.Copy size={15} /> Invite link
+                    </>
+                  )}
                 </button>
-                {requestNote[ev.id] && (
-                  <p style={requestNote[ev.id]?.ok ? styles.ok : styles.error}>
-                    {requestNote[ev.id]?.text}
-                  </p>
-                )}
               </div>
-            )}
-            {!ev.active && (
-              <p style={styles.muted}>This event is closed and no longer accepting members.</p>
-            )}
-          </div>
-        ))}
-        {searching ? <p style={styles.muted}>Searching…</p> : null}
-      </section>
+            );
+          })}
+        </section>
 
-      {/* Join */}
-      <section style={styles.section}>
-        <h2 style={styles.title}>Join an event</h2>
-        <form onSubmit={handleJoin} style={{ ...styles.row }}>
-          <input
-            style={{ ...styles.input, flex: 1 }}
-            value={joinInput}
-            onChange={(e) => setJoinInput(e.target.value)}
-            placeholder="Paste a join link or token"
-          />
-          <button type="submit" disabled={joining || !joinInput.trim()}>
-            {joining ? "Joining…" : "Join"}
-          </button>
-        </form>
-        {joinMessage && (
-          <p style={joinMessage.ok ? styles.ok : styles.error}>
-            {joinMessage.text}
-          </p>
-        )}
-      </section>
-    </>
+        {/* Search */}
+        <section className="card">
+          <div className="card-header">
+            <h2 className="h2">Find an event</h2>
+          </div>
+          <form onSubmit={handleSearch} className="input-group">
+            <div className="input-icon">
+              <Icon.Search />
+              <input
+                className="input"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search public events by name…"
+              />
+            </div>
+            <button type="submit" className="btn" disabled={searching || !query.trim()}>
+              {searching ? <span className="spinner" /> : "Search"}
+            </button>
+          </form>
+          {results.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              {results.map((ev) => {
+                const t = thumbFor(ev.name);
+                return (
+                  <div key={ev.id} className="event-row">
+                    <span className="event-thumb" style={{ background: t.background }}>
+                      {t.letter}
+                    </span>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="row" style={{ gap: 8, flexWrap: "nowrap" }}>
+                        <span className="event-name">{ev.name}</span>
+                        <StatusBadge active={ev.active} expires={ev.expires_at} />
+                      </div>
+                      <div className="meta">
+                        <span>
+                          <Icon.Clock size={13} /> {closesLabel(ev.expires_at)}
+                        </span>
+                      </div>
+                      {requestNote[ev.id] && (
+                        <p
+                          className="small"
+                          style={{
+                            marginTop: 6,
+                            color: requestNote[ev.id]?.ok ? "var(--ok)" : "var(--danger)",
+                          }}
+                        >
+                          {requestNote[ev.id]?.text}
+                        </p>
+                      )}
+                    </div>
+                    {ev.active ? (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-primary"
+                        onClick={() => handleRequestToJoin(ev.id)}
+                        disabled={requestingEvent === ev.id}
+                      >
+                        {requestingEvent === ev.id ? "Requesting…" : "Request to join"}
+                      </button>
+                    ) : (
+                      <span className="muted small">Not accepting members</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
   );
 }

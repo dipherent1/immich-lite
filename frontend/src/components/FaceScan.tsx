@@ -2,13 +2,18 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { Icon } from "@/components/ui";
 import { ApiError, getMe, scanFace } from "@/lib/api";
 
 const POSES = [
-  { id: "front", label: "Front", text: "Face the camera" },
-  { id: "left", label: "Left", text: "Turn head slightly left" },
-  { id: "right", label: "Right", text: "Turn head slightly right" },
-];
+  { id: "front", label: "Front", title: "First, look straight ahead", text: "Hold still" },
+  { id: "left", label: "Left", title: "Next, look to your left", text: "Turn your head slowly" },
+  { id: "right", label: "Right", title: "Now look to your right", text: "Turn your head slowly" },
+] as const;
+
+// Progress ring geometry (SVG units).
+const RING_R = 48;
+const RING_C = 2 * Math.PI * RING_R;
 
 interface Capture {
   file: File;
@@ -134,127 +139,159 @@ export default function FaceScan() {
     }
   }
 
-  const styles = {
-    container: {
-      marginTop: 24,
-      border: "1px solid #ddd",
-      borderRadius: 8,
-      padding: 16,
-      maxWidth: 520,
-    } as const,
-    video: {
-      width: "100%",
-      borderRadius: 8,
-      background: "#000",
-      transform: "scaleX(-1)",
-    } as const,
-    steps: { display: "flex", gap: 10, marginBottom: 14, justifyContent: "center" } as const,
-  };
-
   if (done) {
     return (
-      <section style={styles.container}>
-        <h2 style={{ marginTop: 0 }}>Face profile</h2>
-        <p style={{ color: "#1a7f37", fontWeight: 600 }}>✔ Face stored — done!</p>
-        <p>
-          <button onClick={() => setDone(false)}>Scan again</button>
-        </p>
+      <section className="card">
+        <div className="scan-status">
+          <span className="scan-ring ready">
+            <Icon.Check size={30} />
+          </span>
+          <div style={{ flex: 1 }}>
+            <span className="eyebrow" style={{ color: "var(--ok)" }}>
+              Face profile
+            </span>
+            <h2 className="h2" style={{ marginTop: 6 }}>
+              You&apos;re all set
+            </h2>
+            <p className="muted small">Face stored. New event photos will be matched to you.</p>
+          </div>
+        </div>
+        <button className="btn btn-sm" style={{ marginTop: 18 }} onClick={() => setDone(false)}>
+          Scan again
+        </button>
+      </section>
+    );
+  }
+
+  if (!camOn) {
+    const ready = hasProfile === true;
+    return (
+      <section className="card">
+        <div className="scan-status">
+          <span className={`scan-ring ${hasProfile === null ? "" : ready ? "ready" : "missing"}`}>
+            {hasProfile === null ? <span className="spinner" /> : <Icon.Face size={32} />}
+          </span>
+          <div style={{ flex: 1 }}>
+            <span className="eyebrow" style={ready ? { color: "var(--ok)" } : undefined}>
+              Face profile
+            </span>
+            <h2 className="h2" style={{ marginTop: 6 }}>
+              {hasProfile === null
+                ? "Checking…"
+                : ready
+                  ? "Profile stored"
+                  : "Scan your face to get matched"}
+            </h2>
+            <p className="muted small">
+              {ready
+                ? "You can rescan any time to refresh it."
+                : "Three quick poses — front, left, right. Takes about 20 seconds."}
+            </p>
+          </div>
+        </div>
+        <button
+          className={`btn ${ready ? "" : "btn-primary"} btn-block`}
+          style={{ marginTop: 18 }}
+          onClick={startCamera}
+        >
+          <Icon.Face /> {ready ? "Rescan face" : "Start face scan"}
+        </button>
+        {error ? (
+          <p className="alert alert-error" style={{ marginTop: 14 }}>
+            {error}
+          </p>
+        ) : null}
       </section>
     );
   }
 
   return (
-    <section style={styles.container}>
-      <h2 style={{ marginTop: 0 }}>Face profile</h2>
-      {!camOn ? (
-        <>
-          <p>
-            Status:{" "}
-            {hasProfile === null ? "checking…" : hasProfile ? "✔ stored" : "✘ not stored yet"}
-          </p>
-          <button onClick={startCamera}>Scan face</button>
-          {error ? <p style={{ color: "#cf222e" }}>{error}</p> : null}
-        </>
-      ) : (
-        <>
-          <div style={styles.steps}>
-            {POSES.map((p, i) => {
-              const captured = captures.length > i;
-              const active = captures.length === i;
-              return (
-                <div
-                  key={p.id}
-                  style={{
-                    width: 66,
-                    padding: "6px 4px",
-                    borderRadius: 16,
-                    textAlign: "center",
-                    fontSize: "0.8rem",
-                    fontWeight: 600,
-                    border: `2px solid ${captured ? "#22c55e" : active ? "#3b82f6" : "#ccc"}`,
-                    color: captured ? "#22c55e" : active ? "#3b82f6" : "#999",
-                  }}
-                >
-                  {p.label}
-                </div>
-              );
-            })}
-          </div>
+    <section className="card">
+      <div className="card-header">
+        <h2 className="h2">Face scan</h2>
+        <span className="muted small">{Math.min(captures.length, 3)} / 3</span>
+      </div>
 
-          <div style={{ position: "relative", background: "#000", borderRadius: 8 }}>
-            <video ref={videoRef} autoPlay playsInline muted style={styles.video} />
-            <div
-              style={{
-                position: "absolute",
-                bottom: 12,
-                left: "50%",
-                transform: "translateX(-50%)",
-                background: "rgba(0,0,0,0.7)",
-                color: "#fff",
-                padding: "6px 16px",
-                borderRadius: 20,
-                fontSize: "0.95rem",
-                whiteSpace: "nowrap",
-              }}
+      <div className="face-scan">
+        <div className="face-circle">
+          <video ref={videoRef} autoPlay playsInline muted />
+
+          {/* Direction cue for the current pose (left / right only). */}
+          {captures.length < 3 && POSES[captures.length].id !== "front" && (
+            <svg
+              key={POSES[captures.length].id}
+              className={`face-arrow ${POSES[captures.length].id}`}
+              viewBox="0 0 100 20"
+              aria-hidden
             >
-              {captures.length < 3
-                ? `${POSES[captures.length].label}: ${POSES[captures.length].text}`
-                : "All captured — storing…"}
-            </div>
-          </div>
-          <canvas ref={canvasRef} style={{ display: "none" }} />
+              <path d="M88 10H12M24 2 12 10l12 8" />
+            </svg>
+          )}
 
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              marginTop: 12,
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
-          >
-            {captures.map((c, i) => (
-              <img
-                key={i}
-                src={c.preview}
-                alt={POSES[i].label}
-                style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, border: "2px solid #22c55e" }}
-              />
-            ))}
-          </div>
+          <svg className="face-ring" viewBox="0 0 100 100" aria-hidden>
+            <circle cx="50" cy="50" r={RING_R} className="track" />
+            <circle
+              cx="50"
+              cy="50"
+              r={RING_R}
+              className="progress"
+              strokeDasharray={RING_C}
+              strokeDashoffset={RING_C * (1 - Math.min(captures.length, 3) / 3)}
+            />
+          </svg>
+        </div>
 
-          <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-            <button onClick={capture} disabled={captures.length >= 3 || busy}>
-              Capture {POSES[captures.length < 3 ? captures.length : 2].label}
-            </button>
-            <button onClick={stopCamera} disabled={busy}>
-              Cancel
-            </button>
-          </div>
-          {busy ? <p style={{ margin: "10px 0 0" }}>Storing your face…</p> : null}
-          {error ? <p style={{ color: "#cf222e" }}>{error}</p> : null}
-        </>
+        <div className="face-copy" aria-live="polite">
+          <strong>
+            {captures.length < 3 ? POSES[captures.length].title : "All set — saving your face…"}
+          </strong>
+          <span>{captures.length < 3 ? POSES[captures.length].text : "This takes a second"}</span>
+        </div>
+
+        <div className="face-dots" aria-hidden>
+          {POSES.map((p, i) => (
+            <span
+              key={p.id}
+              className={captures.length > i ? "done" : captures.length === i ? "active" : ""}
+            />
+          ))}
+        </div>
+      </div>
+      <canvas ref={canvasRef} style={{ display: "none" }} />
+
+      {captures.length > 0 && (
+        <div className="thumbs">
+          {captures.map((c, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img key={i} src={c.preview} alt={POSES[i].label} />
+          ))}
+        </div>
       )}
+
+      <div className="row" style={{ marginTop: 14 }}>
+        <button
+          className="btn btn-primary"
+          style={{ flex: 1 }}
+          onClick={capture}
+          disabled={captures.length >= 3 || busy}
+        >
+          {busy ? (
+            <>
+              <span className="spinner" /> Storing your face…
+            </>
+          ) : (
+            <>Capture {POSES[captures.length < 3 ? captures.length : 2].label}</>
+          )}
+        </button>
+        <button className="btn" onClick={stopCamera} disabled={busy}>
+          Cancel
+        </button>
+      </div>
+      {error ? (
+        <p className="alert alert-error" style={{ marginTop: 14 }}>
+          {error}
+        </p>
+      ) : null}
     </section>
   );
 }
