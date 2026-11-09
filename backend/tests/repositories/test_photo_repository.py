@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlmodel import select
 
@@ -83,7 +83,7 @@ def test_list_pending_only_pending_oldest_first(db_session):
     user = _make_user(db_session)
     event = _make_event(db_session, user.id)
     repo = PhotoRepository(db_session)
-    base = datetime(2026, 1, 1)
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
     for i in range(3):
         db_session.add(
             Photo(
@@ -117,7 +117,7 @@ def test_list_for_event_newest_first_and_pagination(db_session):
     user = _make_user(db_session)
     event = _make_event(db_session, user.id)
     repo = PhotoRepository(db_session)
-    base = datetime(2026, 1, 1)
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
     for i in range(25):
         db_session.add(
             Photo(
@@ -133,12 +133,12 @@ def test_list_for_event_newest_first_and_pagination(db_session):
     page1, has_more = repo.list_for_event(event.id, offset=0, limit=24)
     assert len(page1) == 24
     assert has_more is True
-    assert page1[0].uploaded_at == base + timedelta(minutes=24)
+    assert page1[0].uploaded_at.replace(tzinfo=timezone.utc) == base + timedelta(minutes=24)
 
     page2, has_more2 = repo.list_for_event(event.id, offset=24, limit=24)
     assert len(page2) == 1
     assert has_more2 is False
-    assert page2[0].uploaded_at == base
+    assert page2[0].uploaded_at.replace(tzinfo=timezone.utc) == base
 
 
 def test_list_for_event_scoped_to_event(db_session):
