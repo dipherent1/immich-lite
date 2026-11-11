@@ -1,0 +1,9 @@
+services:
+  app:
+    image: ghcr.io/dipherent1/immich-lite-backend:${IMAGE_TAG:?IMAGE_TAG is required}
+
+  worker:
+    image: ghcr.io/dipherent1/immich-lite-backend:${IMAGE_TAG:?IMAGE_TAG is required}
+
+  frontend:
+    image: ghcr.io/dipherent1/immich-lite-frontend:${IMAGE_TAG:?IMAGE_TAG is required}
