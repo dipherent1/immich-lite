@@ -11,17 +11,23 @@ if str(_SRC) not in sys.path:
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+from slowapi.errors import RateLimitExceeded
 
 from app.api.v1.api import api_router
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.core.middleware import RequestLoggingMiddleware
+from app.core.rate_limit import RateLimitMiddleware, limiter, rate_limit_exceeded_handler
 
 logger = setup_logging()
 
 settings = get_settings()
 
 app = FastAPI(title=settings.app_name, version=settings.app_version)
+
+# Attach the rate limiter to the app state so SlowAPI can find it.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 # Order matters: within Starlette/FastAPI, the LAST-added middleware is the
 # outermost. We add CORS first so it wraps request logging, then our logging
@@ -34,6 +40,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(RequestLoggingMiddleware)
+# RateLimitMiddleware runs inside RequestLoggingMiddleware so 429s are logged.
+app.add_middleware(RateLimitMiddleware)
 
 app.include_router(api_router)
 

@@ -50,6 +50,19 @@ services:
       - app-network
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    container_name: immich-lite-redis
+    command: redis-server --save "" --appendonly no --maxmemory 64mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - app-network
+    restart: unless-stopped
+
   # --- Application backend & worker ---
   app:
     image: ghcr.io/dipherent1/immich-lite-backend:${IMAGE_TAG:-dev}
@@ -63,9 +76,12 @@ services:
       - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-immich_lite}
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
       - RABBITMQ_URL=amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/%2F
+      - REDIS_URL=redis://redis:6379/0
       - MODEL_NAME=${MODEL_NAME:-buffalo_s}
       - OUTPUT_ROOT=${OUTPUT_ROOT:-/app/output}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost,http://localhost:80,http://localhost:3000}
+      - RATE_LIMIT_GLOBAL=${RATE_LIMIT_GLOBAL:-60/minute}
+      - RATE_LIMIT_AUTH=${RATE_LIMIT_AUTH:-10/minute}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -74,6 +90,8 @@ services:
       postgres:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - app-network

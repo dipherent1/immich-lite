@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     jwt_expires_minutes: int = int(os.getenv("JWT_EXPIRES_MINUTES", 60 * 24 * 7))  # 7 days
 
+    # Rate limiting. Redis is the shared counter store (required for multi-worker deployments).
+    # Falls back to in-memory if REDIS_URL is not set (single-process dev only).
+    redis_url: str = os.getenv("REDIS_URL", "memory://")
+    # Global limit applied to every route (format: "N/period", period = second|minute|hour).
+    rate_limit_global: str = os.getenv("RATE_LIMIT_GLOBAL", "60/minute")
+    # Tighter limit for auth endpoints (login, register) to slow brute-force attempts.
+    rate_limit_auth: str = os.getenv("RATE_LIMIT_AUTH", "10/minute")
+
 
 @lru_cache
 def get_settings() -> Settings:

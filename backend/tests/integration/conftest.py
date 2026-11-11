@@ -33,10 +33,14 @@ def client(db_session, tmp_path, profile_repo, face_repo, profile_service):
     Every request shares one SQLite session, and the Qdrant-backed repositories
     are swapped for mocks so nothing ever touches a real Qdrant server. The file
     service writes to a per-test temp dir instead of the real output root.
+
+    Rate limiting is disabled for the test client: all integration tests share
+    the same "testclient" IP and would otherwise trip the per-IP limits.
     """
     from app.api import deps
     from app.core.database import get_db
     from app.core.file_storage import LocalFileService
+    from app.core.rate_limit import limiter
     from app.main import app
 
     def _override_db():
@@ -48,10 +52,15 @@ def client(db_session, tmp_path, profile_repo, face_repo, profile_service):
     app.dependency_overrides[deps.get_profile_service] = lambda: profile_service
     app.dependency_overrides[deps.get_file_service] = lambda: LocalFileService(root=str(tmp_path))
 
+    # Disable rate limiting for the duration of the test so the shared
+    # "testclient" IP doesn't trip per-IP limits across the suite.
+    limiter.reset()
+    limiter.enabled = False
     try:
         with TestClient(app) as test_client:
             yield test_client
     finally:
+        limiter.enabled = True
         app.dependency_overrides.clear()
 
 
