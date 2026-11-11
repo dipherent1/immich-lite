@@ -12,13 +12,12 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.v1.api import api_router
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.core.middleware import RequestLoggingMiddleware
-from app.core.rate_limit import limiter, rate_limit_exceeded_handler
+from app.core.rate_limit import RateLimitMiddleware, limiter, rate_limit_exceeded_handler
 
 logger = setup_logging()
 
@@ -41,9 +40,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(RequestLoggingMiddleware)
-# SlowAPIMiddleware must be innermost (added last) so the limiter runs inside
-# the logging layer and 429s are logged like any other response.
-app.add_middleware(SlowAPIMiddleware)
+# RateLimitMiddleware runs inside RequestLoggingMiddleware so 429s are logged.
+app.add_middleware(RateLimitMiddleware)
 
 app.include_router(api_router)
 
