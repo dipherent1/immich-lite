@@ -57,3 +57,5 @@ jobs:
           context: ./frontend
           push: ${{ github.event_name == 'push' }}
           tags: ghcr.io/${{ github.repository_owner }}/immich-lite-frontend:${{ github.sha }}
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}

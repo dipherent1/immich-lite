@@ -52,6 +52,7 @@ services:
 
   # --- Application backend & worker ---
   app:
+    image: ghcr.io/dipherent1/immich-lite-backend:${IMAGE_TAG:-dev}
     build: ./backend
     container_name: immich-lite-app
     volumes:
@@ -79,6 +80,7 @@ services:
     restart: unless-stopped
 
   worker:
+    image: ghcr.io/dipherent1/immich-lite-backend:${IMAGE_TAG:-dev}
     build: ./backend
     container_name: immich-lite-worker
     command: ["python", "-m", "app.workers.photo_worker"]
@@ -105,6 +107,7 @@ services:
 
   # --- Application frontend ---
   frontend:
+    image: ghcr.io/dipherent1/immich-lite-frontend:${IMAGE_TAG:-dev}
     build:
       context: ./frontend
       args:
