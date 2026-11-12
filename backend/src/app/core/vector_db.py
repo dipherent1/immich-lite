@@ -10,6 +10,7 @@ from qdrant_client.http.models import (
     Distance,
     FieldCondition,
     Filter,
+    FilterSelector,
     MatchAny,
     MatchValue,
     PointStruct,
@@ -244,6 +245,19 @@ class EventFaceRepository:
             if offset is None:
                 break
         return faces
+
+    def delete_by_event(self, event_id: str) -> None:
+        """Delete every face point of an event (Qdrant has no cascade, so this
+        must be called explicitly when an event is deleted). Idempotent."""
+        self._client.delete(
+            collection_name=self._collection_name,
+            points_selector=FilterSelector(
+                filter=Filter(
+                    must=[FieldCondition(key="event_id", match=MatchValue(value=event_id))]
+                )
+            ),
+        )
+        logger.info("deleted face points event=%s", event_id)
 
     def get_faces_for_photo(self, photo_id: str) -> list[FaceEmbedding]:
         """Return every face vector (with bbox) stored for a single photo.

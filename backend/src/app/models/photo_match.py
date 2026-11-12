@@ -30,7 +30,7 @@ class PhotoMatch(SQLModel, table=True):
     __tablename__ = "photo_matches"
 
     id: str = Field(default_factory=_uuid, primary_key=True, index=True)
-    photo_id: str = Field(foreign_key="photos.id", index=True)
+    photo_id: str = Field(foreign_key="photos.id", ondelete="CASCADE", index=True)
     user_id: str = Field(foreign_key="users.id", index=True)
     similarity: float
     bbox: str  # JSON object string, e.g. '{"x1":..,"y1":..,"x2":..,"y2":..}'

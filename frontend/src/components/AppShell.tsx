@@ -1,23 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
 import NotificationBell from "@/components/NotificationBell";
+import ProfileMenu from "@/components/ProfileMenu";
 import { Brand, Icon } from "@/components/ui";
-import { logout } from "@/lib/api";
 
 const LINKS = [
-  { href: "/dashboard", label: "Dashboard", icon: Icon.Ticket },
+  { href: "/dashboard", label: "Events", icon: Icon.Ticket },
   { href: "/matches", label: "My photos", icon: Icon.Images },
-  { href: "/notifications", label: "Alerts", icon: Icon.Bell },
 ];
 
 /**
- * Chrome for signed-in pages: sticky top bar (brand, nav, bell, logout) and a
- * floating tab bar on mobile. `showBell` is off on the notifications page so it
- * doesn't open a second live stream next to the page's own.
+ * Chrome for signed-in pages.
+ *   - Desktop: slim left sidebar (brand + Events / My photos) and a small
+ *     top-right bar with the notification bell and the profile menu.
+ *   - Mobile (≤720px): the sidebar hides, the top bar shows the brand, and a
+ *     floating bottom tab bar carries the two destinations.
+ * The bell and profile menu are rendered once (in the top bar) for both
+ * layouts so only one live notification stream is ever opened.
+ * `showBell` is off on the notifications page, which runs its own stream.
  */
 export default function AppShell({
   children,
@@ -27,50 +31,42 @@ export default function AppShell({
   showBell?: boolean;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
 
   function isActive(href: string) {
     return pathname === href || (href === "/dashboard" && pathname.startsWith("/events"));
   }
 
-  function handleLogout() {
-    logout(); // clears the stored token via lib/api
-    router.push("/login");
-  }
-
   return (
     <>
       <div className="app-bg" aria-hidden />
-      <header className="site-header">
-        <div className="container site-header-inner">
+      <div className="app-layout">
+        <aside className="sidebar">
           <Brand href="/dashboard" />
-          <nav className="nav hide-mobile">
+          <nav className="side-nav" aria-label="Primary">
             {LINKS.map((l) => (
               <Link
                 key={l.href}
                 href={l.href}
-                className={`nav-link${isActive(l.href) ? " active" : ""}`}
+                className={`side-link${isActive(l.href) ? " active" : ""}`}
               >
+                <l.icon size={19} />
                 {l.label}
               </Link>
             ))}
           </nav>
-          <div className="header-actions">
-            {showBell && <NotificationBell />}
-            <button
-              type="button"
-              className="icon-btn"
-              onClick={handleLogout}
-              aria-label="Log out"
-              title="Log out"
-            >
-              <Icon.Logout />
-            </button>
-          </div>
-        </div>
-      </header>
+        </aside>
 
-      <main className="page">{children}</main>
+        <div className="app-main">
+          <header className="topbar">
+            <Brand href="/dashboard" />
+            <div className="header-actions">
+              {showBell && <NotificationBell />}
+              <ProfileMenu />
+            </div>
+          </header>
+          <main className="page">{children}</main>
+        </div>
+      </div>
 
       <nav className="tabbar" aria-label="Primary">
         {LINKS.map((l) => (

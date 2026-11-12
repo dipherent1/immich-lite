@@ -81,6 +81,12 @@ export const Icon = {
       <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
     </svg>
   ),
+  Download: (p: IconProps) => (
+    <svg {...base(p)}>
+      <path d="M12 4v12M7 11l5 5 5-5" />
+      <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+    </svg>
+  ),
   Copy: (p: IconProps) => (
     <svg {...base(p)}>
       <rect x="9" y="9" width="11" height="11" rx="2" />

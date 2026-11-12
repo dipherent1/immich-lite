@@ -8,6 +8,7 @@ import AppShell from "@/components/AppShell";
 import RequireAuth from "@/components/RequireAuth";
 import { Icon } from "@/components/ui";
 import PhotoGrid from "@/components/PhotoGrid";
+import { endsWithin, parseUtc, timeLeftLabel } from "@/lib/lifetime";
 import {
   ApiError,
   approveRequest,
@@ -16,7 +17,8 @@ import {
   getEventPhotoObjectUrl,
   listPendingRequests,
   uploadEventCover,
-  uploadEventPhoto,
+  uploadEventPhotosBatch,
+  MAX_BATCH_FILES,
   type EventDetailResponse,
   type EventResponse,
   type JoinRequestResponse,
@@ -25,6 +27,16 @@ import {
 function joinLinkFor(token: string): string {
   return `${window.location.origin}/join/${token}`;
 }
+
+// Photo formats the API accepts (videos are not allowed).
+const PHOTO_EXT = /\.(jpe?g|png|webp|bmp|heic|heif|tiff?|gif|avif)$/i;
+
+function isPhoto(file: File): boolean {
+  return !file.type.startsWith("video/") && PHOTO_EXT.test(file.name);
+}
+
+// Thumbnails rendered for the queue; the rest are summarised as "+N".
+const QUEUE_PREVIEW_LIMIT = 30;
 
 interface SelectedImage {
   file: File;
@@ -39,6 +51,7 @@ function EventPreviewContent() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<SelectedImage[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [uploadNote, setUploadNote] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [joinRequests, setJoinRequests] = useState<JoinRequestResponse[]>([]);
@@ -123,17 +136,32 @@ function EventPreviewContent() {
   }
 
   // Selecting files only queues them (with thumbnails) — upload happens when the
-  // button is hit.
+  // button is hit. Up to MAX_BATCH_FILES (100) can be queued at once.
   function onFilesSelected(list: FileList | null) {
     if (!list) return;
     previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
-    const next: SelectedImage[] = Array.from(list).map((file) => ({
+    const picked = Array.from(list);
+    // Photos only: drop videos and anything else that isn't a photo.
+    const all = picked.filter(isPhoto);
+    const skipped = picked.length - all.length;
+    const next: SelectedImage[] = all.slice(0, MAX_BATCH_FILES).map((file) => ({
       file,
       url: URL.createObjectURL(file),
     }));
     previewUrlsRef.current = next.map((s) => s.url);
     setSelected(next);
-    setUploadNote(null);
+    const notes: string[] = [];
+    if (skipped > 0) {
+      notes.push(
+        `${skipped} file${skipped === 1 ? " was" : "s were"} skipped — only photos are allowed, not videos.`,
+      );
+    }
+    if (all.length > MAX_BATCH_FILES) {
+      notes.push(
+        `Only the first ${MAX_BATCH_FILES} of ${all.length} photos were queued — upload these, then add the rest.`,
+      );
+    }
+    setUploadNote(notes.length > 0 ? notes.join(" ") : null);
   }
 
   // "Cancel" an individual queued photo: drop it from the batch and free its link.
@@ -152,12 +180,52 @@ function EventPreviewContent() {
     if (selected.length === 0 || !eventId) return;
     setUploading(true);
     setUploadNote(null);
-    const results = await Promise.allSettled(
-      selected.map((s) => uploadEventPhoto(eventId, s.file)),
-    );
-    const failed = results.filter((r) => r.status === "rejected").length;
-    const succeeded = results.length - failed;
+
+    // Send in chunks so progress is visible and one network hiccup only costs a
+    // chunk, not all 100 photos. Each request is capped by count AND bytes: the
+    // Next.js proxy buffers request bodies in memory (limit 100MB, see
+    // next.config.ts), and phone photos are several MB each.
+    const MAX_CHUNK_FILES = 10;
+    const MAX_CHUNK_BYTES = 40 * 1024 * 1024;
+    const files = selected.map((s) => s.file);
+    const chunks: File[][] = [];
+    let current: File[] = [];
+    let currentBytes = 0;
+    for (const f of files) {
+      if (
+        current.length > 0 &&
+        (current.length >= MAX_CHUNK_FILES || currentBytes + f.size > MAX_CHUNK_BYTES)
+      ) {
+        chunks.push(current);
+        current = [];
+        currentBytes = 0;
+      }
+      current.push(f);
+      currentBytes += f.size;
+    }
+    if (current.length > 0) chunks.push(current);
+
+    const errors: string[] = [];
+    let succeeded = 0;
+    let sent = 0;
+    setProgress({ done: 0, total: files.length });
+    for (const chunk of chunks) {
+      try {
+        const res = await uploadEventPhotosBatch(eventId, chunk);
+        succeeded += res.succeeded;
+        for (const item of res.items) {
+          if (!item.ok) errors.push(`${item.filename}: ${item.error ?? "failed"}`);
+        }
+      } catch (err) {
+        const why = err instanceof ApiError ? err.detail : "network error";
+        for (const f of chunk) errors.push(`${f.name}: ${why}`);
+      }
+      sent += chunk.length;
+      setProgress({ done: sent, total: files.length });
+    }
+
     setUploading(false);
+    setProgress(null);
     previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
     previewUrlsRef.current = [];
     setSelected([]);
@@ -166,12 +234,14 @@ function EventPreviewContent() {
     getEvent(eventId)
       .then(setEvent)
       .catch(() => {});
-    if (failed > 0) {
+    if (errors.length > 0) {
+      const shown = errors.slice(0, 3).join("; ");
+      const more = errors.length > 3 ? ` (+${errors.length - 3} more)` : "";
       setUploadNote(
-        `${succeeded} of ${results.length} uploaded; ${failed} failed. Check that each file is an image under 20 MB.`,
+        `${succeeded} of ${files.length} uploaded; ${errors.length} failed — ${shown}${more}`,
       );
     } else {
-      setUploadNote(`${results.length} photo${results.length === 1 ? "" : "s"} uploaded.`);
+      setUploadNote(`${succeeded} photo${succeeded === 1 ? "" : "s"} uploaded.`);
     }
   }
 
@@ -221,7 +291,7 @@ function EventPreviewContent() {
   }
 
   const fmt = (iso: string) =>
-    new Date(iso).toLocaleString(undefined, {
+    parseUtc(iso).toLocaleString(undefined, {
       month: "short",
       day: "numeric",
       hour: "numeric",
@@ -268,10 +338,10 @@ function EventPreviewContent() {
             <div className="row" style={{ justifyContent: "center", position: "relative", zIndex: 2 }}>
               {event.expires_at ? (
                 <span className={`badge ${event.active ? "badge-open" : "badge-closed"}`}>
-                  {event.active ? "Open" : "Closed"}
+                  {event.active ? "Open" : "Ended"}
                 </span>
               ) : (
-                <span className="badge badge-open">Open · no end</span>
+                <span className="badge badge-open">Open</span>
               )}
               {event.is_owner && <span className="badge">You&apos;re the host</span>}
             </div>
@@ -312,6 +382,20 @@ function EventPreviewContent() {
             </p>
           )}
 
+          {event.expires_at && (
+            <div
+              className={`expiry-banner${endsWithin(event.expires_at, 20) ? " urgent" : ""}`}
+              role="status"
+            >
+              <Icon.Clock size={18} />
+              <span>
+                <strong>This event is deleted in {timeLeftLabel(event.expires_at)}</strong>{" "}
+                ({fmt(event.expires_at)}). Its photos and matches are removed with it, so
+                download what you want to keep.
+              </span>
+            </div>
+          )}
+
           <div className="facts">
             <div className="fact">
               <div className="fact-label">
@@ -327,10 +411,10 @@ function EventPreviewContent() {
             </div>
             <div className="fact">
               <div className="fact-label">
-                <Icon.Clock size={13} /> Closes
+                <Icon.Clock size={13} /> Deleted
               </div>
               <div className="fact-value">
-                {event.expires_at ? fmt(event.expires_at) : "No closing time"}
+                {event.expires_at ? fmt(event.expires_at) : "Never (older event)"}
               </div>
             </div>
             <div className="fact">
@@ -354,7 +438,7 @@ function EventPreviewContent() {
               <label className={`dropzone${uploading ? " disabled" : ""}`}>
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/*,.heic,.heif"
                   multiple
                   disabled={uploading}
                   onChange={(e) => {
@@ -368,25 +452,40 @@ function EventPreviewContent() {
                 </span>
                 <strong>Choose photos</strong>
                 <span className="muted small">
-                  JPG or PNG, up to 20 MB each. We&apos;ll match faces automatically.
+                  Up to 100 at a time · Photos only (no videos) · JPG, PNG or HEIC · 20 MB each. We&apos;ll match faces automatically.
                 </span>
               </label>
 
               {selected.length > 0 && (
                 <div className="queue">
-                  {selected.map((img, i) => (
+                  {selected.slice(0, QUEUE_PREVIEW_LIMIT).map((img, i) => (
                     <div key={img.url} className="queue-item">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={img.url} alt={`Selected photo ${i + 1}`} />
+                      <img
+                        src={img.url}
+                        alt={`Selected photo ${i + 1}`}
+                        loading="lazy"
+                        decoding="async"
+                        onError={(e) => {
+                          // Browsers can't preview HEIC; it still uploads fine.
+                          e.currentTarget.style.visibility = "hidden";
+                        }}
+                      />
                       <button
                         type="button"
                         aria-label={`Remove photo ${i + 1}`}
                         onClick={() => removeSelected(i)}
+                        disabled={uploading}
                       >
                         <Icon.X size={12} />
                       </button>
                     </div>
                   ))}
+                  {selected.length > QUEUE_PREVIEW_LIMIT && (
+                    <div className="queue-item queue-more">
+                      +{selected.length - QUEUE_PREVIEW_LIMIT}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -399,7 +498,7 @@ function EventPreviewContent() {
               >
                 {uploading ? (
                   <>
-                    <span className="spinner" /> Uploading…
+                    <span className="spinner" /> Uploading{progress ? ` ${progress.done}/${progress.total}` : "…"}
                   </>
                 ) : selected.length === 0 ? (
                   "Upload photos"
@@ -507,6 +606,7 @@ function EventPreviewContent() {
 
           <PhotoGrid
             eventId={eventId}
+            eventName={event.name}
             refreshKey={refreshKey}
             isOwner={event.is_owner}
             coverPhotoId={event.cover_photo_id}

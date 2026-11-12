@@ -50,11 +50,19 @@ class Settings(BaseSettings):
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     jwt_expires_minutes: int = int(os.getenv("JWT_EXPIRES_MINUTES", 60 * 24 * 7))  # 7 days
 
+    # Event lifetime: every new event is deleted (with its photos, previews and
+    # face vectors) this many hours after it is created.
+    event_lifetime_hours: int = int(os.getenv("EVENT_LIFETIME_HOURS", "6"))
+    # Attendees get an "ending soon" notification this many minutes before deletion.
+    event_expiry_warning_minutes: int = int(os.getenv("EVENT_EXPIRY_WARNING_MINUTES", "20"))
+    # How often the worker checks for events to warn about / delete.
+    event_sweep_interval_seconds: int = int(os.getenv("EVENT_SWEEP_INTERVAL_SECONDS", "60"))
+
     # Rate limiting. Redis is the shared counter store (required for multi-worker deployments).
     # Falls back to in-memory if REDIS_URL is not set (single-process dev only).
     redis_url: str = os.getenv("REDIS_URL", "memory://")
     # Global limit applied to every route (format: "N/period", period = second|minute|hour).
-    rate_limit_global: str = os.getenv("RATE_LIMIT_GLOBAL", "60/minute")
+    rate_limit_global: str = os.getenv("RATE_LIMIT_GLOBAL", "150/minute")
     # Tighter limit for auth endpoints (login, register) to slow brute-force attempts.
     rate_limit_auth: str = os.getenv("RATE_LIMIT_AUTH", "10/minute")
 

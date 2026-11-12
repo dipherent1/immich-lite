@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlmodel import Session, func, select
+from sqlmodel import Session, delete, func, select
 
 from app.models.notification import Notification
 
@@ -33,6 +33,17 @@ class NotificationRepository:
         self._db.commit()
         self._db.refresh(notif)
         return notif
+
+    def delete_for_subject(self, subject_type: str, subject_id: str) -> None:
+        """Remove notifications pointing at a subject that no longer exists
+        (notifications carry soft ids, so the DB can't cascade these)."""
+        self._db.execute(
+            delete(Notification).where(
+                Notification.subject_type == subject_type,
+                Notification.subject_id == subject_id,
+            )
+        )
+        self._db.commit()
 
     def list_for_user(
         self,

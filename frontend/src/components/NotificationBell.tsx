@@ -32,6 +32,8 @@ function iconFor(type: string): React.ReactNode {
       return <Icon.Check size={17} />;
     case "join_denied":
       return <Icon.X size={17} />;
+    case "event_expiring":
+      return <Icon.Clock size={17} />;
     case "photo_matched":
       return <Icon.Images size={17} />;
     case "photo_processed":
@@ -42,6 +44,7 @@ function iconFor(type: string): React.ReactNode {
 }
 
 function iconTone(type: string): React.CSSProperties {
+  if (type === "event_expiring") return { background: "var(--danger-soft)", color: "var(--danger)" };
   if (type === "photo_matched") return { background: "var(--accent-soft)", color: "var(--accent)" };
   if (type === "join_approved") return { background: "var(--ok-soft)", color: "var(--ok)" };
   if (type === "join_denied") return { background: "var(--danger-soft)", color: "var(--danger)" };
@@ -49,10 +52,10 @@ function iconTone(type: string): React.CSSProperties {
 }
 
 function subjectHref(n: NotificationResponse): string {
+  // "You were found in a photo" → your gallery is the useful destination.
+  if (n.type === "photo_matched") return "/matches";
+  // Join requests / approvals / processed uploads all carry the event id.
   if (n.subject_type === "event" && n.subject_id) return `/events/${n.subject_id}`;
-  if (n.subject_type === "photo" && n.subject_id) return `/events?focus=${n.subject_id}`;
-  // join_request subject_id is the request row; route to events for a generic view.
-  if (n.subject_type === "join_request") return `/events`;
   return "/dashboard";
 }
 

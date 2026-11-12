@@ -23,7 +23,11 @@ class Event(SQLModel, table=True):
     name: str
     join_token: str = Field(unique=True, index=True)
     starts_at: datetime
-    expires_at: datetime | None = None
+    # Events are deleted (with all photos) once expires_at passes. NULL = legacy
+    # event created before the 6-hour rule; the sweep never touches those.
+    expires_at: datetime | None = Field(default=None, index=True)
+    # Set once the "ending soon" notification went out, so it is sent only once.
+    expiry_warned_at: datetime | None = None
     created_at: datetime = Field(default_factory=_utcnow)
     cover_photo_id: str | None = Field(
         default=None,

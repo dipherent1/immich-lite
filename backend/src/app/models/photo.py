@@ -18,7 +18,7 @@ class Photo(SQLModel, table=True):
     __tablename__ = "photos"
 
     id: str = Field(default_factory=_uuid, primary_key=True, index=True)
-    event_id: str = Field(foreign_key="events.id", index=True)
+    event_id: str = Field(foreign_key="events.id", ondelete="CASCADE", index=True)
     uploader_user_id: str = Field(foreign_key="users.id", index=True)
 
     # Relative path under the storage root (e.g. "photos/{event}/{photo_id}.jpg").

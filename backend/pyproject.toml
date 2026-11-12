@@ -2,3 +2,4 @@
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+markers = ["real_image_check: run the real image-content check instead of the test stub"]

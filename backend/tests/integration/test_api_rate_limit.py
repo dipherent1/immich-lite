@@ -1,6 +1,8 @@
 import pytest
 from conftest import API_PREFIX, login
 
+from app.core.config import get_settings
+
 
 @pytest.fixture
 def rate_limited_client(client):
@@ -38,7 +40,10 @@ class TestRateLimiting:
 
     def test_global_limit_blocks_bot_probing_random_404_paths(self, rate_limited_client):
         headers = {"X-Real-IP": "198.51.100.2"}
-        for i in range(60):
+        # Derive the budget from the configured limit ("N/minute") instead of
+        # hard-coding it, so changing RATE_LIMIT_GLOBAL doesn't break this test.
+        budget = int(get_settings().rate_limit_global.split("/")[0])
+        for i in range(budget):
             res = rate_limited_client.get(f"/.env-probe-{i}", headers=headers)
             assert res.status_code == 404
 

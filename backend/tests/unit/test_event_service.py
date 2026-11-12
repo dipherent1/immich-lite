@@ -103,6 +103,36 @@ def test_create_success(service, event_repo, profiles, make_user, make_event):
     event_repo.add_attendee.assert_called_once_with("event-1", owner.id)
 
 
+def _created_kwargs(event_repo) -> dict:
+    return event_repo.create_event.call_args.kwargs
+
+
+def test_create_defaults_to_six_hour_life(service, event_repo, profiles, make_user, make_event):
+    profiles.has_profile.return_value = True
+    event_repo.create_event.return_value = make_event()
+    before = _now()
+    service.create(make_user(), EventCreate(name="Party"))
+    expires_at = _created_kwargs(event_repo)["expires_at"]
+    assert expires_at is not None
+    assert timedelta(hours=6) - timedelta(seconds=5) <= expires_at - before <= timedelta(hours=6, seconds=5)
+
+
+def test_create_allows_shorter_life(service, event_repo, profiles, make_user, make_event):
+    profiles.has_profile.return_value = True
+    event_repo.create_event.return_value = make_event()
+    soon = _now() + timedelta(minutes=30)
+    service.create(make_user(), EventCreate(name="Party", expires_at=soon))
+    assert _created_kwargs(event_repo)["expires_at"] == soon
+
+
+def test_create_caps_longer_life_at_six_hours(service, event_repo, profiles, make_user, make_event):
+    profiles.has_profile.return_value = True
+    event_repo.create_event.return_value = make_event()
+    service.create(make_user(), EventCreate(name="Party", expires_at=_now() + timedelta(days=30)))
+    expires_at = _created_kwargs(event_repo)["expires_at"]
+    assert expires_at - _now() <= timedelta(hours=6, seconds=5)
+
+
 def test_create_invalid_window(service, event_repo, profiles, make_user):
     profiles.has_profile.return_value = True
     now = _now()
