@@ -77,16 +77,19 @@ export default function JoinPage() {
 
         {authed === false && (
           <>
-            <p className="muted">Log in or create an account to join this event and get your photos.</p>
+            <p className="muted">
+              Create an account and scan your face once — every photo you&apos;re in at this
+              event comes straight to you.
+            </p>
             <div className="row" style={{ justifyContent: "center", marginTop: 4 }}>
-              <Link href={loginHref} className="btn btn-primary">
-                Log in
-              </Link>
               <Link
                 href={`/register?next=${encodeURIComponent(`/join/${token}`)}`}
-                className="btn"
+                className="btn btn-primary"
               >
                 Create account
+              </Link>
+              <Link href={loginHref} className="btn">
+                I have an account
               </Link>
             </div>
           </>

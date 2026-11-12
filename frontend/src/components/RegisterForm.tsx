@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
-import { ApiError, register } from "@/lib/api";
+import { ApiError, login, register } from "@/lib/api";
+import { nextFromLocation, onboardingHref } from "@/lib/nav";
 
 export default function RegisterForm() {
   const router = useRouter();
@@ -13,13 +14,23 @@ export default function RegisterForm() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Keep ?next= (e.g. an invite link) when switching to the login page.
+  function goToLogin(e: React.MouseEvent) {
+    e.preventDefault();
+    const next = nextFromLocation("");
+    router.push(next ? `/login?next=${encodeURIComponent(next)}` : "/login");
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
       await register(email, password, displayName);
-      router.push("/login");
+      // Sign straight in and go to the one-time face scan; it then continues
+      // to ?next= (an invite link finishes joining) or the dashboard.
+      await login(email, password);
+      router.push(onboardingHref(nextFromLocation()));
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Something went wrong.");
     } finally {
@@ -97,7 +108,7 @@ export default function RegisterForm() {
       </button>
 
       <p className="auth-switch">
-        Have an account? <a href="/login">Log in</a>
+        Have an account? <a href="/login" onClick={goToLogin}>Log in</a>
       </p>
     </form>
   );
