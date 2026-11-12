@@ -1,28 +1,97 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 
 import { Brand, Icon } from "@/components/ui";
+
+export const metadata: Metadata = {
+  title: "Immich Lite — like Google Photos, but worse",
+  description:
+    "Everyone uploads, faces get matched, you get your photos. Then everything self-destructs after 6 hours. Like Google Photos, but worse.",
+};
 
 const STEPS = [
   {
     n: "01",
     icon: <Icon.Face size={44} />,
-    meta: ["~20 seconds", "3 quick poses"],
+    meta: ["~20 seconds", "3 poses"],
     title: "Scan your face once",
-    body: "Front, left, right. We turn it into a private face profile — no selfies stored, just a vector.",
+    body: "Front, left, right. Yes, we're judging your angles. We keep a private face profile (a bunch of numbers, not your selfies) and you never do this again.",
   },
   {
     n: "02",
     icon: <Icon.Ticket size={44} />,
-    meta: ["Share link", "Or request to join"],
-    title: "Join the event",
-    body: "Tap the invite link from the host, or find the event and ask to get in. Hosts approve who's on the list.",
+    meta: ["One link", "Zero codes"],
+    title: "Open the invite link",
+    body: "That's the whole join flow. If the host is picky, you can also ask to get in and hope for the best.",
   },
   {
     n: "03",
     icon: <Icon.Images size={44} />,
-    meta: ["Live notifications", "Only your shots"],
-    title: "Get every photo you're in",
-    body: "As the photographer uploads, we find you in the crowd and drop those shots straight into your feed.",
+    meta: ["Live alerts", "Only your face"],
+    title: "Receive your photos",
+    body: "Someone uploads 400 pictures. Our robots find the ones with you in them and hand them over. The other 396 are not your problem.",
+  },
+];
+
+type Win = "them" | "us" | "tie";
+
+const COMPARE: { what: string; them: string; us: string; win: Win }[] = [
+  {
+    what: "How long your photos live",
+    them: "Forever (or until the storage bill)",
+    us: "6 hours. We have commitment issues.",
+    win: "them",
+  },
+  {
+    what: "Finds the photos you're in",
+    them: "Yes, quietly",
+    us: "Yes, annoyingly well",
+    win: "tie",
+  },
+  {
+    what: "Photos from someone else's event",
+    them: "A shared album and a prayer",
+    us: "One link. No prayer needed.",
+    win: "us",
+  },
+  {
+    what: "Videos",
+    them: "Of course",
+    us: "No. They're heavy and we're cheap.",
+    win: "them",
+  },
+  {
+    what: "Polish",
+    them: "Billions of dollars of it",
+    us: "A dark theme and good intentions",
+    win: "them",
+  },
+  {
+    what: "Your data after the party",
+    them: "Lives on, indefinitely",
+    us: "Deleted. Actually deleted.",
+    win: "us",
+  },
+];
+
+const QUIPS = [
+  "“Found me in the background of a stranger's photo. Impressive. Concerning.”",
+  "“Deleted my event after exactly 6 hours. Respect.”",
+  "“It's like Google Photos,” said the founder, repeatedly.",
+];
+
+const FINE_PRINT = [
+  {
+    q: "Why does everything vanish after 6 hours?",
+    a: "Storage costs money and our bank account has feelings. Download your photos before the timer hits zero. We'll nag you 20 minutes before, and the event page counts down so you can't claim surprise.",
+  },
+  {
+    q: "Where are the videos?",
+    a: "Not here. Photos only (JPG, PNG, HEIC and friends, up to 20 MB each). Videos are enormous, and so is the invoice.",
+  },
+  {
+    q: "Do I really need an account?",
+    a: "To get your photos, yes. We need to know which face is yours. One scan, once, then you're done.",
   },
 ];
 
@@ -44,6 +113,7 @@ export default function Home() {
           <Brand />
           <nav className="nav hide-mobile">
             <a className="nav-link" href="#how">How it works</a>
+            <a className="nav-link" href="#compare">Vs. Google Photos</a>
             <a className="nav-link" href="#features">For hosts</a>
           </nav>
           <div className="header-actions">
@@ -87,60 +157,29 @@ export default function Home() {
                 <span className="scanline" />
               </div>
               <span className="match-pill p1">
-                <span className="dot" /> 12 photos found
+                <span className="dot" /> 12 photos found (3 blurry)
               </span>
               <span className="match-pill p2">
-                <Icon.Face size={14} /> Face profile ready
+                <Icon.Face size={14} /> Face judged. Profile ready.
               </span>
             </div>
 
-            <h1 className="display hero-title">
-              Find <span className="outline">your</span>
-              <br />
-              <span className="accent-text">shots</span>
+            <h1 className="display hero-title snark">
+              <span className="snark-small">It&apos;s like</span>
+              <span className="accent-text">Google Photos</span>
+              <span className="outline">but worse.</span>
             </h1>
 
             <p className="hero-sub">
-              Every event photo you&apos;re in — found by your face and delivered to
-              you. No scrolling through 2,000 pictures of strangers.
+              Everyone uploads. Faces get matched. You get the photos you&apos;re in.
+              Then everything self-destructs after 6 hours, because storage isn&apos;t
+              free and neither is our rent.
             </p>
 
             <div className="hero-cta">
               <Link className="btn btn-primary btn-lg" href="/register">
-                Get started <Icon.Arrow />
+                Lower your expectations <Icon.Arrow />
               </Link>
-              <a className="btn btn-lg" href="#how">
-                See how it works
-              </a>
-            </div>
-          </div>
-        </section>
-
-        {/* Stats */}
-        <section className="container" style={{ marginTop: -20 }}>
-          <div className="stats">
-            <div className="stats-label">
-              One scan.
-              <br />
-              Every event.
-            </div>
-            <div className="stats-values">
-              <div className="stat">
-                <div className="stat-value">3</div>
-                <div className="stat-label">Poses to enroll</div>
-              </div>
-              <div className="stat">
-                <div className="stat-value">1</div>
-                <div className="stat-label">Face profile</div>
-              </div>
-              <div className="stat">
-                <div className="stat-value">20MB</div>
-                <div className="stat-label">Per photo upload</div>
-              </div>
-              <div className="stat">
-                <div className="stat-value">Live</div>
-                <div className="stat-label">Match alerts</div>
-              </div>
             </div>
           </div>
         </section>
@@ -150,9 +189,10 @@ export default function Home() {
           <div className="container">
             <div className="section-head center">
               <span className="eyebrow">How it works</span>
-              <h2 className="h1">From the crowd to your camera roll</h2>
+              <h2 className="h1">Three steps. We kept it short on purpose.</h2>
               <p className="muted">
-                Three steps, and the photos come to you instead of the other way around.
+                The photos come to you, instead of you scrolling through 2,000 pictures of
+                strangers&apos; brunch.
               </p>
             </div>
             <div className="steps">
@@ -175,6 +215,56 @@ export default function Home() {
           </div>
         </section>
 
+        {/* Vs Google Photos */}
+        <section id="compare" className="section" style={{ paddingTop: 20 }}>
+          <div className="container">
+            <div className="section-head center">
+              <span className="eyebrow">The honest comparison</span>
+              <h2 className="h1">Google Photos vs. us</h2>
+              <p className="muted">
+                We did the math. Google Photos wins more rows. We win the ones that matter
+                to people at parties.
+              </p>
+            </div>
+
+            <table className="compare">
+              <thead>
+                <tr>
+                  <th scope="col" />
+                  <th scope="col">Google Photos</th>
+                  <th scope="col" className="us">
+                    Immich Lite
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {COMPARE.map((row) => (
+                  <tr key={row.what}>
+                    <th scope="row">{row.what}</th>
+                    <td data-label="Google Photos" className={row.win === "them" || row.win === "tie" ? "win" : "lose"}>
+                      {row.win === "us" ? <Icon.X size={16} /> : <Icon.Check size={16} />}
+                      <span>{row.them}</span>
+                    </td>
+                    <td data-label="Immich Lite" className={`us ${row.win === "us" || row.win === "tie" ? "win" : "lose"}`}>
+                      {row.win === "them" ? <Icon.X size={16} /> : <Icon.Check size={16} />}
+                      <span>{row.us}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div className="quips" aria-label="Reviews we wrote ourselves">
+              <span className="quips-label">Reviews (we wrote them)</span>
+              {QUIPS.map((q) => (
+                <p className="quip" key={q}>
+                  {q}
+                </p>
+              ))}
+            </div>
+          </div>
+        </section>
+
         {/* For hosts */}
         <section id="features" className="section" style={{ paddingTop: 20 }}>
           <div className="container split">
@@ -192,16 +282,19 @@ export default function Home() {
               </h2>
               <ul className="check-list">
                 <li>
-                  <Icon.Check /> Create an event and share a single invite link.
+                  <Icon.Check /> Create an event, get one link, drop it in the group chat. Ignore the
+                  &quot;who&apos;s in this one?&quot; replies.
                 </li>
                 <li>
-                  <Icon.Check /> Approve or deny join requests — only guests see the photos.
+                  <Icon.Check /> Throw in up to 100 photos at a time. Matching happens in the
+                  background while you do literally anything else.
                 </li>
                 <li>
-                  <Icon.Check /> Drop in a batch of shots; matching runs in the background.
+                  <Icon.Check /> Approve or deny join requests. Yes, you may say no to Karen.
                 </li>
                 <li>
-                  <Icon.Shield /> Close the event when you&apos;re done and the link stops working.
+                  <Icon.Download /> Grab everything as a zip. The event is deleted 6 hours after it
+                  starts, and we are not sorry.
                 </li>
               </ul>
               <Link className="btn btn-primary" href="/register">
@@ -211,15 +304,33 @@ export default function Home() {
           </div>
         </section>
 
+        {/* Fine print */}
+        <section className="section" style={{ paddingTop: 20 }}>
+          <div className="container">
+            <div className="section-head center">
+              <span className="eyebrow">The fine print</span>
+              <h2 className="h1">Questions you were about to ask</h2>
+            </div>
+            <div className="fineprint">
+              {FINE_PRINT.map((f) => (
+                <article className="fineprint-card" key={f.q}>
+                  <h3>{f.q}</h3>
+                  <p className="muted">{f.a}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
         {/* CTA */}
         <section className="section" style={{ paddingTop: 20 }}>
           <div className="container">
             <div className="cta-band">
-              <span className="eyebrow">Ready when you are</span>
+              <span className="eyebrow">Last chance to leave</span>
               <h2 className="display">
-                Stop searching.
+                Lower your
                 <br />
-                <span className="accent-text">Start finding.</span>
+                <span className="accent-text">expectations.</span>
               </h2>
               <div className="hero-cta">
                 <Link className="btn btn-primary btn-lg" href="/register">
@@ -237,7 +348,7 @@ export default function Home() {
       <footer className="site-footer">
         <div className="container spread">
           <Brand />
-          <span>Face-based photo matching for events.</span>
+          <span>Face-based photo matching for events. Not affiliated with Google. Obviously.</span>
         </div>
       </footer>
     </>
