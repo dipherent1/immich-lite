@@ -15,6 +15,10 @@ class EventCreate(BaseModel):
     expires_at: datetime | None = None
 
 
+class EventCoverUpdate(BaseModel):
+    photo_id: str = Field(min_length=1)
+
+
 class EventResponse(BaseModel):
     id: str
     name: str
@@ -23,6 +27,8 @@ class EventResponse(BaseModel):
     expires_at: datetime | None
     created_at: datetime
     active: bool
+    cover_photo_id: str | None = None
+    cover_url: str | None = None
 
 
 class EventPublicResponse(BaseModel):

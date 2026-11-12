@@ -4,6 +4,7 @@ from app.schemas.auth import (
     TokenResponse,
 )
 from app.schemas.event import (
+    EventCoverUpdate,
     EventCreate,
     EventDetailResponse,
     EventJoinResponse,
@@ -26,6 +27,7 @@ __all__ = [
     "RegisterRequest",
     "TokenResponse",
     "UserResponse",
+    "EventCoverUpdate",
     "EventCreate",
     "EventResponse",
     "EventPublicResponse",

@@ -6,6 +6,7 @@ from app.api.deps import get_current_user, get_event_service, get_photo_service
 from app.models.event import Event
 from app.models.user import User
 from app.schemas.event import (
+    EventCoverUpdate,
     EventCreate,
     EventDetailResponse,
     EventJoinResponse,
@@ -20,6 +21,11 @@ router = APIRouter(prefix="/events", tags=["events"])
 
 
 def _to_response(event: Event) -> EventResponse:
+    cover_url = (
+        f"/api/v1/events/{event.id}/photos/{event.cover_photo_id}/file"
+        if event.cover_photo_id
+        else None
+    )
     return EventResponse(
         id=event.id,
         name=event.name,
@@ -28,6 +34,8 @@ def _to_response(event: Event) -> EventResponse:
         expires_at=event.expires_at,
         created_at=event.created_at,
         active=EventService.is_active(event),
+        cover_photo_id=event.cover_photo_id,
+        cover_url=cover_url,
     )
 
 
@@ -92,6 +100,38 @@ def get_event(
         attendee_count=attendee_count,
         is_owner=event.owner_id == current_user.id,
     )
+
+
+@router.patch(
+    "/{event_id}/cover",
+    response_model=EventResponse,
+    status_code=status.HTTP_200_OK,
+)
+def set_event_cover(
+    event_id: str,
+    payload: EventCoverUpdate,
+    current_user: User = Depends(get_current_user),
+    service: PhotoService = Depends(get_photo_service),
+) -> EventResponse:
+    event = service.set_cover_photo(current_user.id, event_id, payload.photo_id)
+    return _to_response(event)
+
+
+@router.post(
+    "/{event_id}/cover",
+    response_model=EventResponse,
+    status_code=status.HTTP_200_OK,
+)
+def upload_event_cover(
+    event_id: str,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    service: PhotoService = Depends(get_photo_service),
+) -> EventResponse:
+    event = service.upload_cover(
+        current_user.id, event_id, file.filename or "cover", file.file.read()
+    )
+    return _to_response(event)
 
 
 @router.post(

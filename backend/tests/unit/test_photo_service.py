@@ -131,6 +131,7 @@ def test_upload_success_enqueues(event_repo, photo_repo, file_service, make_even
     photo_repo.create.assert_called_once_with(
         event_id="event-1", uploader_user_id="user-1", storage_path="photos/event-1/photo-1.jpg"
     )
+    event_repo.set_cover_photo_if_unset.assert_called_once_with("event-1", "photo-1")
 
 
 def test_upload_queue_down_upload_still_succeeds(event_repo, photo_repo, file_service, make_event, service, monkeypatch):
@@ -210,3 +211,78 @@ def test_get_photo_file_missing_on_disk(event_repo, photo_repo, file_service, ma
     with pytest.raises(HTTPException) as exc:
         service.get_photo_file("user-1", "event-1", "photo-1")
     assert exc.value.status_code == 404
+
+
+# --- cover photo ---
+
+
+def test_set_cover_photo_success(event_repo, photo_repo, make_event, service):
+    event = make_event(owner_id="user-1")
+    updated = make_event(owner_id="user-1", cover_photo_id="photo-1")
+    event_repo.get_by_id.return_value = event
+    photo_repo.get_by_id.return_value = _photo(id="photo-1", event_id="event-1")
+    event_repo.set_cover_photo.return_value = updated
+
+    result = service.set_cover_photo("user-1", "event-1", "photo-1")
+    assert result.cover_photo_id == "photo-1"
+    event_repo.set_cover_photo.assert_called_once_with("event-1", "photo-1")
+
+
+def test_set_cover_photo_non_owner_forbidden(event_repo, make_event, service):
+    event_repo.get_by_id.return_value = make_event(owner_id="user-1")
+    with pytest.raises(HTTPException) as exc:
+        service.set_cover_photo("user-2", "event-1", "photo-1")
+    assert exc.value.status_code == 403
+    event_repo.set_cover_photo.assert_not_called()
+
+
+def test_set_cover_photo_event_not_found(event_repo, service):
+    event_repo.get_by_id.return_value = None
+    with pytest.raises(HTTPException) as exc:
+        service.set_cover_photo("user-1", "event-1", "photo-1")
+    assert exc.value.status_code == 404
+
+
+def test_set_cover_photo_missing_or_wrong_event(event_repo, photo_repo, make_event, service):
+    event_repo.get_by_id.return_value = make_event(owner_id="user-1")
+    photo_repo.get_by_id.return_value = _photo(id="photo-1", event_id="other-event")
+    with pytest.raises(HTTPException) as exc:
+        service.set_cover_photo("user-1", "event-1", "photo-1")
+    assert exc.value.status_code == 404
+    event_repo.set_cover_photo.assert_not_called()
+
+
+def test_upload_cover_success(event_repo, photo_repo, file_service, make_event, service, monkeypatch):
+    event = make_event(owner_id="user-1")
+    updated = make_event(owner_id="user-1", cover_photo_id="photo-9")
+    event_repo.get_by_id.return_value = event
+    file_service.save_upload.return_value = "photos/event-1/photo-9.jpg"
+    photo_repo.create.return_value = _photo(id="photo-9")
+    event_repo.set_cover_photo.return_value = updated
+    enqueued = []
+    monkeypatch.setattr("app.services.photo_service.enqueue_photo_processing", lambda pid: enqueued.append(pid))
+
+    result = service.upload_cover("user-1", "event-1", "cover.jpg", b"cover-bytes")
+    assert result.cover_photo_id == "photo-9"
+    assert enqueued == ["photo-9"]
+    event_repo.set_cover_photo.assert_called_once_with("event-1", "photo-9")
+
+
+def test_upload_cover_non_owner_forbidden(event_repo, make_event, service):
+    event_repo.get_by_id.return_value = make_event(owner_id="user-1")
+    with pytest.raises(HTTPException) as exc:
+        service.upload_cover("user-2", "event-1", "cover.jpg", b"cover-bytes")
+    assert exc.value.status_code == 403
+
+
+def test_upload_cover_oversized_rejected(service):
+    with pytest.raises(HTTPException) as exc:
+        service.upload_cover("user-1", "event-1", "cover.jpg", b"x" * (MAX_UPLOAD_BYTES + 1))
+    assert exc.value.status_code == 413
+
+
+def test_upload_cover_unsupported_extension_rejected(event_repo, make_event, service):
+    event_repo.get_by_id.return_value = make_event(owner_id="user-1")
+    with pytest.raises(HTTPException) as exc:
+        service.upload_cover("user-1", "event-1", "cover.exe", b"cover-bytes")
+    assert exc.value.status_code == 422
