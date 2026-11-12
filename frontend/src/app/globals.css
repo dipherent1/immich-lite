@@ -2739,3 +2739,44 @@ a.tile:hover {
   width: 34px;
   height: 34px;
 }
+
+/* ---------- Event lifetime notices ---------- */
+
+.lifetime-note,
+.expiry-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 176, 32, 0.3);
+  background: rgba(255, 176, 32, 0.07);
+  color: var(--text-2);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.lifetime-note svg,
+.expiry-banner svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+.lifetime-note strong,
+.expiry-banner strong {
+  color: var(--text);
+}
+
+.expiry-banner {
+  margin-bottom: 20px;
+}
+
+.expiry-banner.urgent {
+  border-color: rgba(255, 92, 92, 0.45);
+  background: var(--danger-soft);
+}
+
+.expiry-banner.urgent svg {
+  color: var(--danger);
+}

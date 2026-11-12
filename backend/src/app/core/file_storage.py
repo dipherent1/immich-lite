@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 
 from app.domain.interfaces import FileService
@@ -57,6 +58,21 @@ class LocalFileService(FileService):
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(src.read_bytes())
         return destination
+
+    def delete_directory(self, relative: str) -> bool:
+        """Recursively delete a directory under the storage root.
+
+        Returns True if something was removed, False if it didn't exist. Refuses
+        to delete the storage root itself.
+        """
+        target = self._resolve(relative)
+        if target == self._root:
+            raise ValueError("refusing to delete the storage root")
+        if not target.exists():
+            return False
+        shutil.rmtree(target)
+        logger.info("deleted directory %s", relative)
+        return True
 
     def read(self, relative: str) -> bytes:
         return self._resolve(relative).read_bytes()

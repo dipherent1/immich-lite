@@ -5,12 +5,12 @@ import { useEffect, useState } from "react";
 
 import { Icon } from "@/components/ui";
 import { ApiError, createEvent } from "@/lib/api";
+import { EVENT_LIFETIME_HOURS } from "@/lib/lifetime";
 
 /** Modal form for hosting a new event. On success navigates to the event. */
 export default function CreateEventDialog({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const [name, setName] = useState("");
-  const [expires, setExpires] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,9 +27,8 @@ export default function CreateEventDialog({ onClose }: { onClose: () => void }) 
     setCreating(true);
     setError(null);
     try {
-      const input: { name: string; expires_at?: string | null } = { name: name.trim() };
-      if (expires) input.expires_at = new Date(expires).toISOString();
-      const event = await createEvent(input);
+      // The server sets the expiry (EVENT_LIFETIME_HOURS after creation).
+      const event = await createEvent({ name: name.trim() });
       router.push(`/events/${event.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Failed to create the event.");
@@ -75,19 +74,14 @@ export default function CreateEventDialog({ onClose }: { onClose: () => void }) 
           />
         </div>
 
-        <div className="field">
-          <label className="label" htmlFor="event-expires">
-            Close after (optional)
-          </label>
-          <input
-            id="event-expires"
-            type="datetime-local"
-            className="input"
-            value={expires}
-            onChange={(e) => setExpires(e.target.value)}
-          />
-          <span className="hint">Leave empty to keep the invite link open.</span>
-        </div>
+        <p className="lifetime-note">
+          <Icon.Clock size={16} />
+          <span>
+            Events last <strong>{EVENT_LIFETIME_HOURS} hours</strong>. After that the event and
+            all its photos are permanently deleted, so guests should download what they want to
+            keep. Everyone gets a reminder 20 minutes before.
+          </span>
+        </p>
 
         {error && <p className="alert alert-error">{error}</p>}
 

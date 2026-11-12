@@ -9,6 +9,7 @@ import EventsView from "@/components/EventsView";
 import RequireAuth from "@/components/RequireAuth";
 import { Icon } from "@/components/ui";
 import { getMe, type UserResponse } from "@/lib/api";
+import { EVENT_LIFETIME_HOURS } from "@/lib/lifetime";
 import { onboardingHref } from "@/lib/nav";
 
 function DashboardContent() {
@@ -31,7 +32,9 @@ function DashboardContent() {
           <h1 className="h1">
             Hey{firstName ? "," : ""} <span className="accent-text">{firstName ?? "there"}</span>
           </h1>
-          <p className="muted">Your events</p>
+          <p className="muted">
+            Your events · deleted automatically {EVENT_LIFETIME_HOURS} hours after they&apos;re created
+          </p>
         </div>
         <EventSearch />
       </section>

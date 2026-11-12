@@ -8,6 +8,7 @@ import AppShell from "@/components/AppShell";
 import RequireAuth from "@/components/RequireAuth";
 import { Icon } from "@/components/ui";
 import PhotoGrid from "@/components/PhotoGrid";
+import { endsWithin, parseUtc, timeLeftLabel } from "@/lib/lifetime";
 import {
   ApiError,
   approveRequest,
@@ -252,7 +253,7 @@ function EventPreviewContent() {
   }
 
   const fmt = (iso: string) =>
-    new Date(iso).toLocaleString(undefined, {
+    parseUtc(iso).toLocaleString(undefined, {
       month: "short",
       day: "numeric",
       hour: "numeric",
@@ -299,10 +300,10 @@ function EventPreviewContent() {
             <div className="row" style={{ justifyContent: "center", position: "relative", zIndex: 2 }}>
               {event.expires_at ? (
                 <span className={`badge ${event.active ? "badge-open" : "badge-closed"}`}>
-                  {event.active ? "Open" : "Closed"}
+                  {event.active ? "Open" : "Ended"}
                 </span>
               ) : (
-                <span className="badge badge-open">Open · no end</span>
+                <span className="badge badge-open">Open</span>
               )}
               {event.is_owner && <span className="badge">You&apos;re the host</span>}
             </div>
@@ -343,6 +344,20 @@ function EventPreviewContent() {
             </p>
           )}
 
+          {event.expires_at && (
+            <div
+              className={`expiry-banner${endsWithin(event.expires_at, 20) ? " urgent" : ""}`}
+              role="status"
+            >
+              <Icon.Clock size={18} />
+              <span>
+                <strong>This event is deleted in {timeLeftLabel(event.expires_at)}</strong>{" "}
+                ({fmt(event.expires_at)}). Its photos and matches are removed with it, so
+                download what you want to keep.
+              </span>
+            </div>
+          )}
+
           <div className="facts">
             <div className="fact">
               <div className="fact-label">
@@ -358,10 +373,10 @@ function EventPreviewContent() {
             </div>
             <div className="fact">
               <div className="fact-label">
-                <Icon.Clock size={13} /> Closes
+                <Icon.Clock size={13} /> Deleted
               </div>
               <div className="fact-value">
-                {event.expires_at ? fmt(event.expires_at) : "No closing time"}
+                {event.expires_at ? fmt(event.expires_at) : "Never (older event)"}
               </div>
             </div>
             <div className="fact">

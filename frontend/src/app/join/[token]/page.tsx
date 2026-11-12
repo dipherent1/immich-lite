@@ -6,6 +6,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { Brand, Icon } from "@/components/ui";
 import { ApiError, isAuthenticated, joinEvent } from "@/lib/api";
+import { EVENT_LIFETIME_HOURS } from "@/lib/lifetime";
 
 function subscribe() {
   return () => {};
@@ -80,6 +81,10 @@ export default function JoinPage() {
             <p className="muted">
               Create an account and scan your face once — every photo you&apos;re in at this
               event comes straight to you.
+            </p>
+            <p className="muted small">
+              Events are deleted {EVENT_LIFETIME_HOURS} hours after they&apos;re created, so grab
+              your photos before then.
             </p>
             <div className="row" style={{ justifyContent: "center", marginTop: 4 }}>
               <Link

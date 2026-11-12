@@ -13,6 +13,7 @@ import {
   listMyEvents,
   type EventResponse,
 } from "@/lib/api";
+import { timeLeftLabel } from "@/lib/lifetime";
 import { joinLinkFor, onboardingHref } from "@/lib/nav";
 
 const THUMBS = [
@@ -32,13 +33,8 @@ function thumbFor(name: string) {
 
 function closesLabel(expires: string | null, active: boolean): string {
   if (!expires) return "Open";
-  if (!active) return "Closed";
-  return `Closes ${new Date(expires).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  })}`;
+  if (!active) return "Ended";
+  return `Deleted in ${timeLeftLabel(expires)}`;
 }
 
 function EventCard({ ev, coverUrl }: { ev: EventResponse; coverUrl?: string }) {

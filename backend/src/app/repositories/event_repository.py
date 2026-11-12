@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from sqlmodel import Session, func, select, update
+from sqlmodel import Session, delete, func, select, update
 
 from app.models.event import Event
 from app.models.event_attendee import EventAttendee
@@ -34,6 +34,44 @@ class EventRepository:
         self._db.commit()
         self._db.refresh(event)
         return event
+
+    def list_expiring_unwarned(self, now: datetime, window: timedelta) -> list[Event]:
+        """Events that end within `window` (but haven't ended) and whose
+        "ending soon" notification hasn't been sent. `now` must be timezone-aware UTC."""
+        return list(
+            self._db.scalars(
+                select(Event).where(
+                    Event.expires_at.is_not(None),  # type: ignore[union-attr]
+                    Event.expires_at > now,  # type: ignore[operator]
+                    Event.expires_at <= now + window,  # type: ignore[operator]
+                    Event.expiry_warned_at.is_(None),  # type: ignore[union-attr]
+                )
+            )
+        )
+
+    def mark_warned(self, event_id: str, now: datetime) -> None:
+        self._db.execute(
+            update(Event).where(Event.id == event_id).values(expiry_warned_at=now)
+        )
+        self._db.commit()
+
+    def list_expired(self, now: datetime) -> list[Event]:
+        """Events whose expiry has passed. `now` must be timezone-aware UTC. Legacy events
+        (expires_at NULL) are never returned."""
+        return list(
+            self._db.scalars(
+                select(Event).where(
+                    Event.expires_at.is_not(None),  # type: ignore[union-attr]
+                    Event.expires_at <= now,  # type: ignore[operator]
+                )
+            )
+        )
+
+    def delete_event(self, event_id: str) -> None:
+        """Delete the event row. Photos, attendees, join requests and (via
+        photos) matches go with it through ON DELETE CASCADE."""
+        self._db.execute(delete(Event).where(Event.id == event_id))
+        self._db.commit()
 
     def get_by_id(self, event_id: str) -> Event | None:
         return self._db.get(Event, event_id)

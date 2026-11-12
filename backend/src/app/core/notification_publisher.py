@@ -30,9 +30,11 @@ def publish_notification(
     body: str,
     subject_type: str | None = None,
     subject_id: str | None = None,
-) -> None:
+) -> bool:
     """Publish a notification event to RabbitMQ. Best-effort: a broker outage
-    here must never fail the worker job, so failures are logged, not raised."""
+    here must never fail the worker job, so failures are logged, not raised.
+    Returns True if the event was published (callers that must not lose the
+    notification can retry on False)."""
     try:
         import pika
 
@@ -67,7 +69,9 @@ def publish_notification(
             "published notification event",
             extra={"extra_fields": {"user_id": user_id, "type": type}},
         )
+        return True
     except Exception:
         logger.exception(
             "failed to publish notification event user=%s type=%s", user_id, type
         )
+        return False
