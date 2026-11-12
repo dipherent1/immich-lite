@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
 from app.api.deps import get_current_user, get_event_service, get_photo_service
 from app.models.event import Event
@@ -13,7 +15,14 @@ from app.schemas.event import (
     EventPublicResponse,
     EventResponse,
 )
-from app.schemas.photo import PhotoListResponse, PhotoResponse, PhotoUploadResponse
+from app.schemas.photo import (
+    BatchUploadItem,
+    BatchUploadResponse,
+    PhotoDownloadRequest,
+    PhotoListResponse,
+    PhotoResponse,
+    PhotoUploadResponse,
+)
 from app.services.event_service import EventService
 from app.services.photo_service import PhotoService
 
@@ -191,5 +200,61 @@ def get_event_photo_file(
     current_user: User = Depends(get_current_user),
     service: PhotoService = Depends(get_photo_service),
 ) -> Response:
-    data = service.get_photo_file(current_user.id, event_id, photo_id)
-    return Response(content=data, media_type="image/jpeg")
+    data, media_type = service.get_photo_file(current_user.id, event_id, photo_id)
+    # Photos are immutable (new id per upload), so the browser may cache them.
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
+@router.post(
+    "/{event_id}/photos/batch",
+    response_model=BatchUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def upload_photos_batch(
+    event_id: str,
+    files: list[UploadFile] = File(...),
+    current_user: User = Depends(get_current_user),
+    service: PhotoService = Depends(get_photo_service),
+) -> BatchUploadResponse:
+    """Upload up to 100 photos in one request; each file succeeds or fails alone."""
+    results = service.upload_many(
+        current_user.id,
+        event_id,
+        [(f.filename or "photo", f.file.read()) for f in files],
+    )
+    items = [
+        BatchUploadItem(
+            filename=name,
+            ok=photo is not None,
+            photo_id=photo.id if photo else None,
+            error=error,
+        )
+        for name, photo, error in results
+    ]
+    ok = sum(1 for i in items if i.ok)
+    return BatchUploadResponse(items=items, succeeded=ok, failed=len(items) - ok)
+
+
+@router.post(
+    "/{event_id}/photos/download",
+    status_code=status.HTTP_200_OK,
+    response_class=FileResponse,
+)
+def download_photos_zip(
+    event_id: str,
+    payload: PhotoDownloadRequest,
+    current_user: User = Depends(get_current_user),
+    service: PhotoService = Depends(get_photo_service),
+) -> FileResponse:
+    """Zip of the original files: the selected `photo_ids`, or the whole event."""
+    path = service.build_zip(current_user.id, event_id, payload.photo_ids)
+    return FileResponse(
+        path,
+        media_type="application/zip",
+        filename="event-photos.zip",
+        background=BackgroundTask(path.unlink, missing_ok=True),
+    )

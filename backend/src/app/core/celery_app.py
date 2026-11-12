@@ -43,6 +43,15 @@ celery_app.conf.update(
     control_queue_exclusive=True,
     event_queue_exclusive=True,
     task_default_queue="photos",
+    # Periodic sweep: warn attendees ~20 min before an event ends, then delete it.
+    # Driven by the worker's embedded beat (see photo_worker.main).
+    beat_schedule={
+        "sweep-expired-events": {
+            "task": "app.workers.photo_worker.sweep_expired_events",
+            "schedule": float(settings.event_sweep_interval_seconds),
+            "options": {"queue": "photos", "expires": 55},
+        }
+    },
     timezone="UTC",
     enable_utc=True,
 )

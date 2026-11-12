@@ -12,6 +12,6 @@ def _utcnow() -> datetime:
 class EventAttendee(SQLModel, table=True):
     __tablename__ = "event_attendees"
 
-    event_id: str = Field(foreign_key="events.id", primary_key=True)
+    event_id: str = Field(foreign_key="events.id", ondelete="CASCADE", primary_key=True)
     user_id: str = Field(foreign_key="users.id", primary_key=True)
     joined_at: datetime = Field(default_factory=_utcnow)

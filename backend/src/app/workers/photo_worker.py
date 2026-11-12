@@ -85,6 +85,33 @@ def process_photo(self, photo_id: str) -> int:
         clear_correlation()
 
 
+@celery_app.task(name="app.workers.photo_worker.sweep_expired_events")
+def sweep_expired_events() -> dict[str, int]:
+    """Celery beat task: send "ending soon" notifications and delete events whose
+    6-hour life is over (photos, previews, face vectors, DB rows)."""
+    from app.core.notification_publisher import publish_notification
+    from app.repositories.notification_repository import NotificationRepository
+    from app.services.event_expiry_service import EventExpiryService
+
+    settings = get_settings()
+    db = SessionLocal()
+    try:
+        service = EventExpiryService(
+            EventRepository(db),
+            NotificationRepository(db),
+            EventFaceRepository(url=settings.qdrant_url),
+            LocalFileService(root=settings.output_root),
+            publish_notification,
+            warning_minutes=settings.event_expiry_warning_minutes,
+        )
+        result = service.sweep()
+        if result["warned"] or result["deleted"]:
+            logger.info("event sweep done", extra={"extra_fields": result})
+        return result
+    finally:
+        db.close()
+
+
 def _publish_match_notifications(photo, matched_user_ids: set[str], db) -> None:
     """Notify every attendee whose face matched this photo. Best-effort: a
     notification failure never marks the job as failed (publish_notification
@@ -126,15 +153,19 @@ def main() -> None:
         pool,
         concurrency,
     )
-    celery_app.worker_main(
-        argv=[
-            "worker",
-            "--loglevel=INFO",
-            "--queues=photos",
-            f"--pool={pool}",
-            f"--concurrency={concurrency}",
-        ]
-    )
+    argv = [
+        "worker",
+        "--loglevel=INFO",
+        "--queues=photos",
+        f"--pool={pool}",
+        f"--concurrency={concurrency}",
+    ]
+    # Embedded beat drives the expired-event sweep. Run a single worker container
+    # (a second would double-schedule; the sweep is idempotent, but wasteful).
+    # Not supported on Windows; native Windows dev runs without the sweep.
+    if sys.platform != "win32":
+        argv += ["--beat", "--schedule=/tmp/celerybeat-schedule"]
+    celery_app.worker_main(argv=argv)
 
 
 if __name__ == "__main__":

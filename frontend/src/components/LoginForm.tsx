@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
-import { ApiError, login } from "@/lib/api";
+import { ApiError, getMe, login } from "@/lib/api";
+import { nextFromLocation, onboardingHref } from "@/lib/nav";
 
 export default function LoginForm() {
   const router = useRouter();
@@ -12,16 +13,24 @@ export default function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Keep ?next= (e.g. an invite link) when switching to the register page.
+  function goToRegister(e: React.MouseEvent) {
+    e.preventDefault();
+    const next = nextFromLocation("");
+    router.push(next ? `/register?next=${encodeURIComponent(next)}` : "/register");
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
       await login(email, password);
-      // If the user came here to join an event (e.g. /login?next=/join/<token>),
-      // send them back there; otherwise go to the dashboard.
-      const next = new URLSearchParams(window.location.search).get("next");
-      router.push(next ?? "/dashboard");
+      // Go back to ?next= (e.g. /join/<token>) or the dashboard — via the
+      // face-scan step first if this account never enrolled a face.
+      const next = nextFromLocation();
+      const me = await getMe().catch(() => null);
+      router.push(me && !me.has_face_profile ? onboardingHref(next) : next);
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Something went wrong.");
     } finally {
@@ -82,7 +91,7 @@ export default function LoginForm() {
       </button>
 
       <p className="auth-switch">
-        No account? <a href="/register">Create one</a>
+        No account? <a href="/register" onClick={goToRegister}>Create one</a>
       </p>
     </form>
   );

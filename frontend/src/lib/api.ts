@@ -325,6 +325,73 @@ export async function uploadEventPhoto(
   );
 }
 
+export interface BatchUploadItem {
+  filename: string;
+  ok: boolean;
+  photo_id: string | null;
+  error: string | null;
+}
+
+export interface BatchUploadResponse {
+  items: BatchUploadItem[];
+  succeeded: number;
+  failed: number;
+}
+
+/** Most photos the API accepts per upload request / that the UI queues at once. */
+export const MAX_BATCH_FILES = 100;
+
+/** Uploads several photos in one request (members only). Each file succeeds or
+ *  fails independently — check `items` for per-file errors. */
+export async function uploadEventPhotosBatch(
+  eventId: string,
+  files: File[],
+): Promise<BatchUploadResponse> {
+  const form = new FormData();
+  for (const file of files) form.append("files", file);
+  return request<BatchUploadResponse>(
+    `/api/v1/events/${encodeURIComponent(eventId)}/photos/batch`,
+    { method: "POST", body: form, authenticated: true },
+  );
+}
+
+/** Downloads the original files as a zip — the given `photoIds`, or every photo
+ *  of the event when omitted — and hands it to the browser as a file save. */
+export async function downloadEventPhotos(
+  eventId: string,
+  photoIds?: string[],
+  filename = "event-photos.zip",
+): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = getToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const path = `/api/v1/events/${encodeURIComponent(eventId)}/photos/download`;
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ photo_ids: photoIds ?? null }),
+  });
+  if (!res.ok) {
+    let detail = `Download failed (${res.status})`;
+    try {
+      const data = await res.json();
+      if (typeof data?.detail === "string") detail = data.detail;
+    } catch {
+      // ignore unparseable bodies
+    }
+    throw new ApiError(res.status, detail);
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Give the browser a moment to start the save before freeing the blob.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 /** Lists an event's photos, newest first, paginated (members only). */
 export async function getEventPhotos(
   eventId: string,

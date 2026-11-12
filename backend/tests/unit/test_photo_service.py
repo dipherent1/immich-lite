@@ -26,6 +26,53 @@ def _active_event(event_repo, make_event):
     return event
 
 
+@pytest.fixture(autouse=True)
+def _treat_bytes_as_images(request, monkeypatch):
+    """Most tests upload placeholder bytes; the content check has its own tests."""
+    if "real_image_check" not in request.keywords:
+        monkeypatch.setattr("app.services.photo_service._is_image", lambda data: True)
+
+
+def _real_jpeg() -> bytes:
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), "red").save(buf, "JPEG")
+    return buf.getvalue()
+
+
+@pytest.mark.real_image_check
+def test_is_image_accepts_real_photo_and_rejects_video_bytes():
+    from app.services.photo_service import _is_image
+
+    assert _is_image(_real_jpeg())
+    # An MP4 header ("ftyp") or arbitrary bytes are not photos, whatever the name.
+    assert not _is_image(b"\x00\x00\x00ftypmp42" + b"\x00" * 64)
+    assert not _is_image(b"not an image")
+
+
+@pytest.mark.real_image_check
+def test_upload_rejects_video_renamed_to_jpg(event_repo, make_event, service):
+    event_repo.get_by_id.return_value = make_event()
+    event_repo.is_attendee.return_value = True
+    with pytest.raises(HTTPException) as exc:
+        service.upload("user-1", "event-1", "clip.jpg", b"\x00\x00\x00ftypmp42" + b"\x00" * 64)
+    assert exc.value.status_code == 422
+    assert "valid photo" in exc.value.detail
+
+
+@pytest.mark.parametrize("name", ["clip.mp4", "movie.mov", "a.webm", "b.mkv", "c.avi"])
+def test_upload_rejects_video_extensions(name, event_repo, make_event, service):
+    event_repo.get_by_id.return_value = make_event()
+    event_repo.is_attendee.return_value = True
+    with pytest.raises(HTTPException) as exc:
+        service.upload("user-1", "event-1", name, b"data")
+    assert exc.value.status_code == 422
+    assert "no videos" in exc.value.detail
+
+
 def _inactive_event(event_repo, make_event):
     now = _now()
     event = make_event(
@@ -180,7 +227,51 @@ def test_get_photo_file_success(event_repo, photo_repo, file_service, make_event
     event_repo.is_attendee.return_value = True
     photo_repo.get_by_id.return_value = _photo()
     file_service.read.return_value = b"image-bytes"
-    assert service.get_photo_file("user-1", "event-1", "photo-1") == b"image-bytes"
+    data, media_type = service.get_photo_file("user-1", "event-1", "photo-1")
+    assert data == b"image-bytes"
+    assert media_type == "image/jpeg"
+
+
+def test_get_photo_file_serves_real_media_type(
+    event_repo, photo_repo, file_service, make_event, service
+):
+    event_repo.get_by_id.return_value = make_event()
+    event_repo.is_attendee.return_value = True
+    photo_repo.get_by_id.return_value = _photo(storage_path="photos/event-1/photo-1.png")
+    file_service.read.return_value = b"png-bytes"
+    assert service.get_photo_file("user-1", "event-1", "photo-1") == (b"png-bytes", "image/png")
+
+
+def test_get_photo_file_converts_heic_to_cached_jpeg(
+    event_repo, photo_repo, file_service, make_event, service, monkeypatch
+):
+    event_repo.get_by_id.return_value = make_event()
+    event_repo.is_attendee.return_value = True
+    photo_repo.get_by_id.return_value = _photo(storage_path="photos/event-1/photo-1.heic")
+    # No cached preview yet, then the original bytes.
+    file_service.read.side_effect = [FileNotFoundError("no preview"), b"heic-bytes"]
+    monkeypatch.setattr("app.services.photo_service._to_preview_jpeg", lambda d: b"jpeg:" + d)
+    assert service.get_photo_file("user-1", "event-1", "photo-1") == (b"jpeg:heic-bytes", "image/jpeg")
+    file_service.save_upload.assert_called_once_with(
+        data=b"jpeg:heic-bytes", relative="previews/event-1/photo-1.jpg"
+    )
+
+
+def test_upload_many_isolates_failures(event_repo, photo_repo, file_service, make_event, service):
+    event_repo.get_by_id.return_value = make_event()
+    event_repo.is_attendee.return_value = True
+    photo_repo.create.return_value = _photo()
+    results = service.upload_many(
+        "user-1", "event-1", [("a.jpg", b"x"), ("notes.txt", b"y"), ("b.png", b"z")]
+    )
+    assert [r[1] is not None for r in results] == [True, False, True]
+    assert "Unsupported" in results[1][2]
+
+
+def test_upload_many_rejects_over_limit(service):
+    with pytest.raises(HTTPException) as exc:
+        service.upload_many("user-1", "event-1", [("a.jpg", b"x")] * 101)
+    assert exc.value.status_code == 422
 
 
 def test_get_photo_file_not_member(event_repo, make_event, service):

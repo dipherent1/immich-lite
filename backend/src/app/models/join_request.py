@@ -24,7 +24,7 @@ class JoinRequest(SQLModel, table=True):
     __tablename__ = "join_requests"
 
     id: str = Field(default_factory=_uuid, primary_key=True, index=True)
-    event_id: str = Field(foreign_key="events.id", index=True)
+    event_id: str = Field(foreign_key="events.id", ondelete="CASCADE", index=True)
     requester_id: str = Field(foreign_key="users.id", index=True)
     status: str = Field(default="pending")  # pending | approved | denied
     created_at: datetime = Field(default_factory=_utcnow)

@@ -27,7 +27,7 @@ interface Capture {
  *   3. User taps "Capture" 3 times — guided Front → Left → Right.
  *   4. All 3 photos are uploaded, the vector is stored, and we show success.
  */
-export default function FaceScan() {
+export default function FaceScan({ onComplete }: { onComplete?: () => void } = {}) {
   const [hasProfile, setHasProfile] = useState<boolean | null>(null);
   const [camOn, setCamOn] = useState(false);
   const [captures, setCaptures] = useState<Capture[]>([]);
@@ -94,6 +94,7 @@ export default function FaceScan() {
       setHasProfile(res.profile_upserted);
       setDone(true);
       stopCamera();
+      onComplete?.();
     } catch (err) {
       console.error("[FaceScan] scanFace failed", err);
       setError(err instanceof ApiError ? err.detail : "Failed to store your face. Try again.");

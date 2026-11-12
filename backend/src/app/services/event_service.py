@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
 
+from app.core.config import get_settings
 from app.models.event import Event
 from app.models.user import User
 from app.repositories.event_repository import EventRepository
@@ -22,10 +23,10 @@ _TOKEN_BYTES = 16
 class EventService:
     """Event lifecycle: creation, join-by-link, and detail/attendee lookup.
 
-    "Active" rule (time window, the simplest option): an event is joinable when
-    `starts_at <= now` and either its `expires_at` is null (never expires, e.g.
-    left open by the owner) or `now <= expires_at`. Out of scope this phase is
-    any owner-toggled `is_open` boolean.
+    "Active" rule (time window): an event is joinable when `starts_at <= now` and
+    either its `expires_at` is null (a legacy event from before the 6-hour rule,
+    which never expires) or `now <= expires_at`. New events always get an
+    `expires_at`; the worker deletes them once it passes (EventExpiryService).
     """
 
     def __init__(
@@ -84,6 +85,13 @@ class EventService:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="expires_at must be after starts_at",
             )
+        # Storage is expensive: every event is deleted EVENT_LIFETIME_HOURS (6)
+        # after it begins. A client may ask for a shorter life, never a longer one.
+        latest_expiry = max(starts_at, datetime.now(timezone.utc)) + timedelta(
+            hours=get_settings().event_lifetime_hours
+        )
+        if expires_at is None or expires_at > latest_expiry:
+            expires_at = latest_expiry
 
         event = self._repository.create_event(
             owner_id=owner.id,
