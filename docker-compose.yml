@@ -80,7 +80,7 @@ services:
       - MODEL_NAME=${MODEL_NAME:-buffalo_s}
       - OUTPUT_ROOT=${OUTPUT_ROOT:-/app/output}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost,http://localhost:80,http://localhost:3000}
-      - RATE_LIMIT_GLOBAL=${RATE_LIMIT_GLOBAL:-60/minute}
+      - RATE_LIMIT_GLOBAL=${RATE_LIMIT_GLOBAL:-300/minute}
       - RATE_LIMIT_AUTH=${RATE_LIMIT_AUTH:-10/minute}
     ports:
       - "127.0.0.1:8000:8000"

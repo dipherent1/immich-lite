@@ -18,6 +18,7 @@ Counter storage:
 from __future__ import annotations
 
 import logging
+import re
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
@@ -31,6 +32,10 @@ from app.core.config import get_settings
 logger = logging.getLogger("app.rate_limit")
 
 _EXEMPT_PATHS = {"/ping", "/metrics"}
+
+# Authenticated image downloads: a gallery page fetches one per thumbnail, so
+# counting them against the global per-IP budget throttles normal browsing.
+_EXEMPT_PATH_RE = re.compile(r"^/api/v1/events/[^/]+/photos/[^/]+/file$")
 
 
 def _client_ip(request: Request) -> str:
@@ -118,7 +123,8 @@ class RateLimitMiddleware:
       1. Does not buffer responses, so SSE streaming works without interference.
       2. Enforces the global per-IP limit even on unknown/404 paths so bots
          probing random endpoints (/.env, /wp-login.php, etc.) are throttled.
-      3. Exempts /ping and /metrics so healthchecks and Prometheus scrapes pass.
+      3. Exempts /ping and /metrics so healthchecks and Prometheus scrapes pass,
+         and authenticated photo file downloads (one request per thumbnail).
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -136,7 +142,7 @@ class RateLimitMiddleware:
             return
 
         request = Request(scope, receive=receive, send=send)
-        if request.url.path in _EXEMPT_PATHS:
+        if request.url.path in _EXEMPT_PATHS or _EXEMPT_PATH_RE.match(request.url.path):
             await self.app(scope, receive, send)
             return
 

@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     # Falls back to in-memory if REDIS_URL is not set (single-process dev only).
     redis_url: str = os.getenv("REDIS_URL", "memory://")
     # Global limit applied to every route (format: "N/period", period = second|minute|hour).
-    rate_limit_global: str = os.getenv("RATE_LIMIT_GLOBAL", "60/minute")
+    rate_limit_global: str = os.getenv("RATE_LIMIT_GLOBAL", "300/minute")
     # Tighter limit for auth endpoints (login, register) to slow brute-force attempts.
     rate_limit_auth: str = os.getenv("RATE_LIMIT_AUTH", "10/minute")
 
