@@ -26,6 +26,53 @@ def _active_event(event_repo, make_event):
     return event
 
 
+@pytest.fixture(autouse=True)
+def _treat_bytes_as_images(request, monkeypatch):
+    """Most tests upload placeholder bytes; the content check has its own tests."""
+    if "real_image_check" not in request.keywords:
+        monkeypatch.setattr("app.services.photo_service._is_image", lambda data: True)
+
+
+def _real_jpeg() -> bytes:
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), "red").save(buf, "JPEG")
+    return buf.getvalue()
+
+
+@pytest.mark.real_image_check
+def test_is_image_accepts_real_photo_and_rejects_video_bytes():
+    from app.services.photo_service import _is_image
+
+    assert _is_image(_real_jpeg())
+    # An MP4 header ("ftyp") or arbitrary bytes are not photos, whatever the name.
+    assert not _is_image(b"\x00\x00\x00ftypmp42" + b"\x00" * 64)
+    assert not _is_image(b"not an image")
+
+
+@pytest.mark.real_image_check
+def test_upload_rejects_video_renamed_to_jpg(event_repo, make_event, service):
+    event_repo.get_by_id.return_value = make_event()
+    event_repo.is_attendee.return_value = True
+    with pytest.raises(HTTPException) as exc:
+        service.upload("user-1", "event-1", "clip.jpg", b"\x00\x00\x00ftypmp42" + b"\x00" * 64)
+    assert exc.value.status_code == 422
+    assert "valid photo" in exc.value.detail
+
+
+@pytest.mark.parametrize("name", ["clip.mp4", "movie.mov", "a.webm", "b.mkv", "c.avi"])
+def test_upload_rejects_video_extensions(name, event_repo, make_event, service):
+    event_repo.get_by_id.return_value = make_event()
+    event_repo.is_attendee.return_value = True
+    with pytest.raises(HTTPException) as exc:
+        service.upload("user-1", "event-1", name, b"data")
+    assert exc.value.status_code == 422
+    assert "no videos" in exc.value.detail
+
+
 def _inactive_event(event_repo, make_event):
     now = _now()
     event = make_event(

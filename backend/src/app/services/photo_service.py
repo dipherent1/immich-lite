@@ -41,6 +41,20 @@ _BROWSER_MIME = {
 _PREVIEW_MAX_PX = 2048
 
 
+def _is_image(data: bytes) -> bool:
+    """True if `data` really is a decodable photo (incl. HEIC), whatever the file
+    name says — so a video or document renamed to .jpg is still rejected."""
+    from PIL import Image
+    from pillow_heif import register_heif_opener
+
+    register_heif_opener()
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            return img.format is not None
+    except Exception:
+        return False
+
+
 def _to_preview_jpeg(data: bytes) -> bytes:
     """Decode any supported image (incl. HEIC) to an upright, display-sized JPEG."""
     from PIL import Image, ImageOps
@@ -82,7 +96,12 @@ class PhotoService:
         if ext not in _ALLOWED_EXTENSIONS:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Unsupported image type: {ext}",
+                detail=f"Unsupported image type: {ext} (only photos are allowed, no videos)",
+            )
+        if not _is_image(data):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="This file isn't a valid photo (videos aren't allowed)",
             )
 
         photo_id = str(uuid.uuid4())

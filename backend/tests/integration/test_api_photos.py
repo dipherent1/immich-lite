@@ -5,7 +5,18 @@ import pytest
 from app.models.photo_match import PhotoMatch
 from conftest import API_PREFIX, auth_header, make_event, register_user
 
-_JPEG = b"\xff\xd8\xff\xe0fake-jpeg-bytes\xff\xd9"
+def _real_jpeg(color: str) -> bytes:
+    """A real (tiny) JPEG — uploads are validated as actual photos."""
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), color).save(buf, "JPEG")
+    return buf.getvalue()
+
+
+_JPEG = _real_jpeg("red")
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +32,25 @@ def _upload(client, headers, event_id, data=_JPEG, filename="pic.jpg"):
         headers=headers,
         files={"file": (filename, data, "image/jpeg")},
     )
+
+
+class TestVideoRejected:
+    def test_video_extension_rejected(self, client):
+        register_user(client)
+        headers = auth_header(client)
+        event = make_event(client, headers).json()
+        res = _upload(client, headers, event["id"], data=b"data", filename="clip.mp4")
+        assert res.status_code == 422
+        assert "no videos" in res.json()["detail"]
+
+    def test_video_renamed_to_jpg_rejected(self, client):
+        register_user(client)
+        headers = auth_header(client)
+        event = make_event(client, headers).json()
+        fake_mp4 = bytes(3) + bytes([24]) + b"ftypmp42" + bytes(64)
+        res = _upload(client, headers, event["id"], data=fake_mp4, filename="clip.jpg")
+        assert res.status_code == 422
+        assert "valid photo" in res.json()["detail"]
 
 
 class TestPhotoUpload:
@@ -221,7 +251,7 @@ class TestEventCover:
         assert res.json()["cover_photo_id"] != first["id"]
 
         # Creator uploads a brand-new cover image directly.
-        custom_bytes = b"\xff\xd8\xff\xe0custom-cover-bytes\xff\xd9"
+        custom_bytes = _real_jpeg("blue")
         uploaded = client.post(
             f"{API_PREFIX}/events/{event['id']}/cover",
             headers=headers,

@@ -126,6 +126,32 @@ export default function PhotoGrid({
       });
   }, [eventId, refreshKey, fetchPage]);
 
+  // Photos are processed in the background (face matching), so right after an
+  // upload their tiles say "Processing…". Poll while any are pending and flip
+  // each tile as its status changes — no reload needed.
+  const hasPending = photos.some((p) => p.status === "pending");
+  useEffect(() => {
+    if (!eventId || !hasPending) return;
+    const timer = setInterval(() => {
+      getEventPhotos(eventId, 0, Math.min(100, Math.max(PAGE_SIZE, photos.length)))
+        .then((page) => {
+          const fresh = new Map(page.items.map((p) => [p.id, p.status]));
+          setPhotos((prev) =>
+            prev.some((p) => fresh.has(p.id) && fresh.get(p.id) !== p.status)
+              ? prev.map((p) => {
+                  const status = fresh.get(p.id);
+                  return status && status !== p.status ? { ...p, status } : p;
+                })
+              : prev,
+          );
+        })
+        .catch(() => {
+          // A failed poll just tries again on the next tick.
+        });
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [eventId, hasPending, photos.length]);
+
   // "Load more" is triggered by a click handler, which is exempt from the lint
   // rule, so it owns its own spinner and appends the page.
   function loadMore() {

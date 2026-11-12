@@ -28,6 +28,13 @@ function joinLinkFor(token: string): string {
   return `${window.location.origin}/join/${token}`;
 }
 
+// Photo formats the API accepts (videos are not allowed).
+const PHOTO_EXT = /\.(jpe?g|png|webp|bmp|heic|heif|tiff?|gif|avif)$/i;
+
+function isPhoto(file: File): boolean {
+  return !file.type.startsWith("video/") && PHOTO_EXT.test(file.name);
+}
+
 // Thumbnails rendered for the queue; the rest are summarised as "+N".
 const QUEUE_PREVIEW_LIMIT = 30;
 
@@ -133,18 +140,28 @@ function EventPreviewContent() {
   function onFilesSelected(list: FileList | null) {
     if (!list) return;
     previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
-    const all = Array.from(list);
+    const picked = Array.from(list);
+    // Photos only: drop videos and anything else that isn't a photo.
+    const all = picked.filter(isPhoto);
+    const skipped = picked.length - all.length;
     const next: SelectedImage[] = all.slice(0, MAX_BATCH_FILES).map((file) => ({
       file,
       url: URL.createObjectURL(file),
     }));
     previewUrlsRef.current = next.map((s) => s.url);
     setSelected(next);
-    setUploadNote(
-      all.length > MAX_BATCH_FILES
-        ? `Only the first ${MAX_BATCH_FILES} of ${all.length} photos were queued — upload these, then add the rest.`
-        : null,
-    );
+    const notes: string[] = [];
+    if (skipped > 0) {
+      notes.push(
+        `${skipped} file${skipped === 1 ? " was" : "s were"} skipped — only photos are allowed, not videos.`,
+      );
+    }
+    if (all.length > MAX_BATCH_FILES) {
+      notes.push(
+        `Only the first ${MAX_BATCH_FILES} of ${all.length} photos were queued — upload these, then add the rest.`,
+      );
+    }
+    setUploadNote(notes.length > 0 ? notes.join(" ") : null);
   }
 
   // "Cancel" an individual queued photo: drop it from the batch and free its link.
@@ -165,14 +182,34 @@ function EventPreviewContent() {
     setUploadNote(null);
 
     // Send in chunks so progress is visible and one network hiccup only costs a
-    // chunk, not all 100 photos. The API accepts up to 100 per request.
-    const CHUNK = 10;
+    // chunk, not all 100 photos. Each request is capped by count AND bytes: the
+    // Next.js proxy buffers request bodies in memory (limit 100MB, see
+    // next.config.ts), and phone photos are several MB each.
+    const MAX_CHUNK_FILES = 10;
+    const MAX_CHUNK_BYTES = 40 * 1024 * 1024;
     const files = selected.map((s) => s.file);
+    const chunks: File[][] = [];
+    let current: File[] = [];
+    let currentBytes = 0;
+    for (const f of files) {
+      if (
+        current.length > 0 &&
+        (current.length >= MAX_CHUNK_FILES || currentBytes + f.size > MAX_CHUNK_BYTES)
+      ) {
+        chunks.push(current);
+        current = [];
+        currentBytes = 0;
+      }
+      current.push(f);
+      currentBytes += f.size;
+    }
+    if (current.length > 0) chunks.push(current);
+
     const errors: string[] = [];
     let succeeded = 0;
+    let sent = 0;
     setProgress({ done: 0, total: files.length });
-    for (let i = 0; i < files.length; i += CHUNK) {
-      const chunk = files.slice(i, i + CHUNK);
+    for (const chunk of chunks) {
       try {
         const res = await uploadEventPhotosBatch(eventId, chunk);
         succeeded += res.succeeded;
@@ -183,7 +220,8 @@ function EventPreviewContent() {
         const why = err instanceof ApiError ? err.detail : "network error";
         for (const f of chunk) errors.push(`${f.name}: ${why}`);
       }
-      setProgress({ done: Math.min(i + CHUNK, files.length), total: files.length });
+      sent += chunk.length;
+      setProgress({ done: sent, total: files.length });
     }
 
     setUploading(false);
@@ -414,7 +452,7 @@ function EventPreviewContent() {
                 </span>
                 <strong>Choose photos</strong>
                 <span className="muted small">
-                  Up to 100 at a time · JPG, PNG or HEIC · 20 MB each. We&apos;ll match faces automatically.
+                  Up to 100 at a time · Photos only (no videos) · JPG, PNG or HEIC · 20 MB each. We&apos;ll match faces automatically.
                 </span>
               </label>
 
