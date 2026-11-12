@@ -51,6 +51,15 @@ class PhotoRepository:
             )
         )
 
+    def list_all_for_event(
+        self, event_id: str, photo_ids: list[str] | None = None
+    ) -> list[Photo]:
+        """Every photo of an event, oldest first (optionally only `photo_ids`)."""
+        stmt = select(Photo).where(Photo.event_id == event_id)
+        if photo_ids is not None:
+            stmt = stmt.where(Photo.id.in_(photo_ids))  # type: ignore[attr-defined]
+        return list(self._db.scalars(stmt.order_by(Photo.uploaded_at)))
+
     def list_for_event(
         self,
         event_id: str,

@@ -180,7 +180,51 @@ def test_get_photo_file_success(event_repo, photo_repo, file_service, make_event
     event_repo.is_attendee.return_value = True
     photo_repo.get_by_id.return_value = _photo()
     file_service.read.return_value = b"image-bytes"
-    assert service.get_photo_file("user-1", "event-1", "photo-1") == b"image-bytes"
+    data, media_type = service.get_photo_file("user-1", "event-1", "photo-1")
+    assert data == b"image-bytes"
+    assert media_type == "image/jpeg"
+
+
+def test_get_photo_file_serves_real_media_type(
+    event_repo, photo_repo, file_service, make_event, service
+):
+    event_repo.get_by_id.return_value = make_event()
+    event_repo.is_attendee.return_value = True
+    photo_repo.get_by_id.return_value = _photo(storage_path="photos/event-1/photo-1.png")
+    file_service.read.return_value = b"png-bytes"
+    assert service.get_photo_file("user-1", "event-1", "photo-1") == (b"png-bytes", "image/png")
+
+
+def test_get_photo_file_converts_heic_to_cached_jpeg(
+    event_repo, photo_repo, file_service, make_event, service, monkeypatch
+):
+    event_repo.get_by_id.return_value = make_event()
+    event_repo.is_attendee.return_value = True
+    photo_repo.get_by_id.return_value = _photo(storage_path="photos/event-1/photo-1.heic")
+    # No cached preview yet, then the original bytes.
+    file_service.read.side_effect = [FileNotFoundError("no preview"), b"heic-bytes"]
+    monkeypatch.setattr("app.services.photo_service._to_preview_jpeg", lambda d: b"jpeg:" + d)
+    assert service.get_photo_file("user-1", "event-1", "photo-1") == (b"jpeg:heic-bytes", "image/jpeg")
+    file_service.save_upload.assert_called_once_with(
+        data=b"jpeg:heic-bytes", relative="previews/event-1/photo-1.jpg"
+    )
+
+
+def test_upload_many_isolates_failures(event_repo, photo_repo, file_service, make_event, service):
+    event_repo.get_by_id.return_value = make_event()
+    event_repo.is_attendee.return_value = True
+    photo_repo.create.return_value = _photo()
+    results = service.upload_many(
+        "user-1", "event-1", [("a.jpg", b"x"), ("notes.txt", b"y"), ("b.png", b"z")]
+    )
+    assert [r[1] is not None for r in results] == [True, False, True]
+    assert "Unsupported" in results[1][2]
+
+
+def test_upload_many_rejects_over_limit(service):
+    with pytest.raises(HTTPException) as exc:
+        service.upload_many("user-1", "event-1", [("a.jpg", b"x")] * 101)
+    assert exc.value.status_code == 422
 
 
 def test_get_photo_file_not_member(event_repo, make_event, service):

@@ -2687,3 +2687,55 @@ a.tile:hover {
 .onboarding > .brand {
   justify-self: center;
 }
+
+/* ---------- Photo selection / batch ---------- */
+
+.photo.selectable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.photo.chosen {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.photo.chosen img {
+  opacity: 0.75;
+}
+
+.photo-check {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  background: rgba(0, 0, 0, 0.35);
+  color: #141008;
+}
+
+.photo-check.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.queue-more {
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.queue-item button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.icon-btn.sm {
+  width: 34px;
+  height: 34px;
+}

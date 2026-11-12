@@ -8,6 +8,7 @@ import CreateEventDialog from "@/components/CreateEventDialog";
 import { Icon } from "@/components/ui";
 import {
   ApiError,
+  downloadEventPhotos,
   getEventPhotoObjectUrl,
   listMyEvents,
   type EventResponse,
@@ -43,6 +44,8 @@ function closesLabel(expires: string | null, active: boolean): string {
 function EventCard({ ev, coverUrl }: { ev: EventResponse; coverUrl?: string }) {
   const [coverBroken, setCoverBroken] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const t = thumbFor(ev.name);
   const showCover = coverUrl && !coverBroken;
   const isOpen = ev.active || !ev.expires_at;
@@ -54,6 +57,22 @@ function EventCard({ ev, coverUrl }: { ev: EventResponse; coverUrl?: string }) {
       setTimeout(() => setCopied(false), 1600);
     } catch {
       // Clipboard may be unavailable (insecure origin); nothing useful to do.
+    }
+  }
+
+  // The cover is set by the first upload, so it doubles as "has photos".
+  const hasPhotos = ev.cover_photo_id != null;
+
+  async function downloadAll() {
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      const safeName = ev.name.replace(/[^\w\- ]+/g, "").trim() || "event";
+      await downloadEventPhotos(ev.id, undefined, `${safeName}-photos.zip`);
+    } catch (err) {
+      setDownloadError(err instanceof ApiError ? err.detail : "Download failed.");
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -81,25 +100,44 @@ function EventCard({ ev, coverUrl }: { ev: EventResponse; coverUrl?: string }) {
             {closesLabel(ev.expires_at, ev.active)}
           </span>
         </div>
-        {isOpen && (
-          <button
-            type="button"
-            className={`btn btn-sm${copied ? " btn-ok" : ""}`}
-            onClick={copy}
-            title="Copy the invite link — anyone who opens it joins this event"
-          >
-            {copied ? (
-              <>
-                <Icon.Check size={15} /> Copied
-              </>
-            ) : (
-              <>
-                <Icon.Link size={15} /> Copy link
-              </>
-            )}
-          </button>
-        )}
+        <div className="row" style={{ gap: 8, flexWrap: "nowrap", flexShrink: 0 }}>
+          {hasPhotos && (
+            <button
+              type="button"
+              className="icon-btn sm"
+              onClick={downloadAll}
+              disabled={downloading}
+              title="Download all photos (zip)"
+              aria-label={`Download all photos from ${ev.name}`}
+            >
+              {downloading ? <span className="spinner" /> : <Icon.Download size={16} />}
+            </button>
+          )}
+          {isOpen && (
+            <button
+              type="button"
+              className={`btn btn-sm${copied ? " btn-ok" : ""}`}
+              onClick={copy}
+              title="Copy the invite link — anyone who opens it joins this event"
+            >
+              {copied ? (
+                <>
+                  <Icon.Check size={15} /> Copied
+                </>
+              ) : (
+                <>
+                  <Icon.Link size={15} /> Copy link
+                </>
+              )}
+            </button>
+          )}
+        </div>
       </div>
+      {downloadError && (
+        <p className="small" style={{ color: "var(--danger)", padding: "0 18px 14px" }}>
+          {downloadError}
+        </p>
+      )}
     </article>
   );
 }

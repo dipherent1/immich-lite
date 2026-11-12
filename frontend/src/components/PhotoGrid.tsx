@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   ApiError,
+  downloadEventPhotos,
   getEventPhotoObjectUrl,
   getEventPhotos,
   setEventCover,
@@ -28,17 +29,21 @@ interface PageResult {
  * - Each photo's raw bytes are fetched through the single API client (auth is
  *   handled there) and rendered as an object URL; URLs are revoked on unmount.
  * - Photos that aren't `processed` yet show a placeholder instead of an image.
+ * - "Select" turns tiles into checkboxes so a subset can be downloaded as a zip;
+ *   "Download all" zips the whole event (including pages not loaded yet).
  *
  * Reusable later for the Phase 5 matched-photo feed.
  */
 export default function PhotoGrid({
   eventId,
+  eventName = "event",
   refreshKey = 0,
   isOwner = false,
   coverPhotoId = null,
   onCoverUpdated,
 }: {
   eventId: string;
+  eventName?: string;
   /** Bump to reload the first page (e.g. after a new upload). */
   refreshKey?: number;
   isOwner?: boolean;
@@ -48,6 +53,8 @@ export default function PhotoGrid({
   // `loading` reflects the initial (mount) fetch and starts true.
   const [photos, setPhotos] = useState<PhotoResponse[]>([]);
   const [urls, setUrls] = useState<Record<string, string>>({});
+  // Tiles whose image couldn't be fetched or decoded (shown as a placeholder).
+  const [broken, setBroken] = useState<Record<string, true>>({});
   const [hasMore, setHasMore] = useState(false);
   const [nextOffset, setNextOffset] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -55,6 +62,10 @@ export default function PhotoGrid({
   const [error, setError] = useState<string | null>(null);
   const [settingCoverId, setSettingCoverId] = useState<string | null>(null);
   const [coverError, setCoverError] = useState<string | null>(null);
+  const [selecting, setSelecting] = useState(false);
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const objectUrlsRef = useRef<string[]>([]);
 
   useEffect(() => {
@@ -79,7 +90,8 @@ export default function PhotoGrid({
             setUrls((prev) => ({ ...prev, [photo.id]: url }));
           })
           .catch(() => {
-            // Individual photo failing shouldn't break the grid.
+            // One bad photo shouldn't break the grid — mark just this tile.
+            setBroken((prev) => ({ ...prev, [photo.id]: true }));
           });
       }
       return {
@@ -102,6 +114,7 @@ export default function PhotoGrid({
         objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
         objectUrlsRef.current = [];
         setUrls({});
+        setBroken({});
         setPhotos(page.items);
         setHasMore(page.has_more);
         setNextOffset(page.next_offset);
@@ -144,18 +157,101 @@ export default function PhotoGrid({
     }
   }
 
+  function toggleChosen(photoId: string) {
+    setChosen((prev) => {
+      const next = new Set(prev);
+      if (next.has(photoId)) next.delete(photoId);
+      else next.add(photoId);
+      return next;
+    });
+  }
+
+  function exitSelecting() {
+    setSelecting(false);
+    setChosen(new Set());
+  }
+
+  async function handleDownload(photoIds?: string[]) {
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      const safeName = eventName.replace(/[^\w\- ]+/g, "").trim() || "event";
+      await downloadEventPhotos(eventId, photoIds, `${safeName}-photos.zip`);
+      if (photoIds) exitSelecting();
+    } catch (err) {
+      setDownloadError(err instanceof ApiError ? err.detail : "Could not download photos.");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   const statusLabel: Record<string, string> = {
     pending: "Processing…",
     failed: "Failed to process",
   };
 
+  const allLoadedChosen = photos.length > 0 && chosen.size === photos.length;
+
   return (
     <section style={{ marginTop: 32 }}>
-      <div className="spread" style={{ marginBottom: 16 }}>
+      <div className="spread" style={{ marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
         <h2 className="h2">Photos</h2>
-        {photos.length > 0 && <span className="muted small">{photos.length} loaded</span>}
+        <div className="row" style={{ gap: 10 }}>
+          {photos.length > 0 && !selecting && (
+            <span className="muted small">{photos.length} loaded</span>
+          )}
+          {photos.length > 0 && !selecting && (
+            <>
+              <button type="button" className="btn btn-sm" onClick={() => setSelecting(true)}>
+                <Icon.Check size={15} /> Select
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={downloading}
+                onClick={() => handleDownload()}
+                title="Download every photo of this event as a zip"
+              >
+                {downloading ? <span className="spinner" /> : <Icon.Download size={15} />} Download all
+              </button>
+            </>
+          )}
+          {selecting && (
+            <>
+              <span className="small">
+                <strong>{chosen.size}</strong> selected
+              </span>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() =>
+                  setChosen(allLoadedChosen ? new Set() : new Set(photos.map((p) => p.id)))
+                }
+              >
+                {allLoadedChosen ? "Clear" : "Select all loaded"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                disabled={chosen.size === 0 || downloading}
+                onClick={() => handleDownload([...chosen])}
+              >
+                {downloading ? <span className="spinner" /> : <Icon.Download size={15} />} Download
+                {chosen.size > 0 ? ` ${chosen.size}` : ""}
+              </button>
+              <button type="button" className="btn btn-sm" onClick={exitSelecting}>
+                Cancel
+              </button>
+            </>
+          )}
+        </div>
       </div>
       {error && <p className="alert alert-error">{error}</p>}
+      {downloadError && (
+        <p className="alert alert-error" style={{ marginBottom: 14 }}>
+          {downloadError}
+        </p>
+      )}
       {coverError && (
         <p className="alert alert-error" style={{ marginBottom: 14 }}>
           {coverError}
@@ -180,21 +276,54 @@ export default function PhotoGrid({
         <div className="photo-grid">
           {photos.map((photo) => {
             const url = urls[photo.id];
-            const ready = url != null && photo.status === "processed";
+            const isBroken = broken[photo.id] === true;
+            const ready = url != null && !isBroken && photo.status === "processed";
             const isCover = coverPhotoId === photo.id;
+            const isChosen = chosen.has(photo.id);
             return (
-              <div key={photo.id} className="photo">
+              <div
+                key={photo.id}
+                className={`photo${selecting ? " selectable" : ""}${isChosen ? " chosen" : ""}`}
+                onClick={selecting ? () => toggleChosen(photo.id) : undefined}
+                role={selecting ? "checkbox" : undefined}
+                aria-checked={selecting ? isChosen : undefined}
+                tabIndex={selecting ? 0 : undefined}
+                onKeyDown={
+                  selecting
+                    ? (e) => {
+                        if (e.key === " " || e.key === "Enter") {
+                          e.preventDefault();
+                          toggleChosen(photo.id);
+                        }
+                      }
+                    : undefined
+                }
+              >
                 {ready ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={url} alt="Event photo" loading="lazy" />
+                  <img
+                    src={url}
+                    alt="Event photo"
+                    loading="lazy"
+                    onError={() => setBroken((prev) => ({ ...prev, [photo.id]: true }))}
+                  />
                 ) : (
-                  <div className={`photo-placeholder${photo.status === "failed" ? " failed" : ""}`}>
-                    {photo.status !== "failed" && <span className="spinner" />}
-                    {statusLabel[photo.status] ?? "Loading…"}
+                  <div
+                    className={`photo-placeholder${
+                      photo.status === "failed" || isBroken ? " failed" : ""
+                    }`}
+                  >
+                    {photo.status !== "failed" && !isBroken && <span className="spinner" />}
+                    {isBroken ? "Can't preview" : (statusLabel[photo.status] ?? "Loading…")}
                   </div>
                 )}
                 {isCover && <span className="photo-cover-badge">Cover</span>}
-                {isOwner && !isCover && url != null && (
+                {selecting && (
+                  <span className={`photo-check${isChosen ? " on" : ""}`} aria-hidden>
+                    {isChosen && <Icon.Check size={14} />}
+                  </span>
+                )}
+                {!selecting && isOwner && !isCover && url != null && !isBroken && (
                   <button
                     type="button"
                     className="photo-cover-btn"
