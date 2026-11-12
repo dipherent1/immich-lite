@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlmodel import Session, func, select
+from sqlmodel import Session, func, select, update
 
 from app.models.event import Event
 from app.models.event_attendee import EventAttendee
@@ -97,3 +97,28 @@ class EventRepository:
                 events.append(event)
         events.sort(key=lambda e: e.created_at, reverse=True)
         return events
+
+    def set_cover_photo_if_unset(self, event_id: str, photo_id: str) -> bool:
+        """Set cover_photo_id only when the event has none yet (first image wins).
+
+        Uses an atomic conditional UPDATE so concurrent batch uploads never race.
+        """
+        result = self._db.execute(
+            update(Event)
+            .where(Event.id == event_id, Event.cover_photo_id.is_(None))
+            .values(cover_photo_id=photo_id),
+            execution_options={"synchronize_session": "fetch"},
+        )
+        self._db.commit()
+        return (result.rowcount or 0) > 0
+
+    def set_cover_photo(self, event_id: str, photo_id: str) -> Event | None:
+        """Explicitly set an event's cover_photo_id (creator-only in the service)."""
+        event = self._db.get(Event, event_id)
+        if event is None:
+            return None
+        event.cover_photo_id = photo_id
+        self._db.add(event)
+        self._db.commit()
+        self._db.refresh(event)
+        return event

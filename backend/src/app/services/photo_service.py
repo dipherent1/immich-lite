@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 
 from app.core.file_storage import LocalFileService
 from app.core.jobs import enqueue_photo_processing
+from app.models.event import Event
 from app.models.photo import Photo
 from app.repositories.event_repository import EventRepository
 from app.repositories.photo_repository import PhotoRepository
@@ -43,28 +44,9 @@ class PhotoService:
         self._photos = photos
         self._files = files
 
-    def upload(self, user_id: str, event_id: str, filename: str, data: bytes) -> Photo:
-        if len(data) > MAX_UPLOAD_BYTES:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail="Photo exceeds the 20 MB upload limit",
-            )
-
-        event = self._events.get_by_id(event_id)
-        if event is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Event not found",
-            )
-
-        # Only an owner/attendee may upload, and only while the event is active.
-        self._ensure_member(user_id, event_id)
-        if not EventService.is_active(event):
-            raise HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail="This event is no longer active",
-            )
-
+    def _store_and_enqueue(
+        self, user_id: str, event_id: str, filename: str, data: bytes
+    ) -> Photo:
         ext = PurePath(filename).suffix.lower() or ".jpg"
         if ext not in _ALLOWED_EXTENSIONS:
             raise HTTPException(
@@ -90,8 +72,85 @@ class PhotoService:
             logger.exception(
                 "photo saved but not enqueued event=%s photo=%s", event_id, photo.id
             )
+        return photo
+
+    def upload(self, user_id: str, event_id: str, filename: str, data: bytes) -> Photo:
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Photo exceeds the 20 MB upload limit",
+            )
+
+        event = self._events.get_by_id(event_id)
+        if event is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Event not found",
+            )
+
+        # Only an owner/attendee may upload, and only while the event is active.
+        self._ensure_member(user_id, event_id)
+        if not EventService.is_active(event):
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="This event is no longer active",
+            )
+
+        photo = self._store_and_enqueue(user_id, event_id, filename, data)
+        # Default the event cover image to the first uploaded photo.
+        self._events.set_cover_photo_if_unset(event_id, photo.id)
         logger.info("photo uploaded event=%s uploader=%s photo=%s", event_id, user_id, photo.id)
         return photo
+
+    def _ensure_owner(self, user_id: str, event_id: str) -> Event:
+        event = self._events.get_by_id(event_id)
+        if event is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Event not found",
+            )
+        if event.owner_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the event creator can edit the cover image",
+            )
+        return event
+
+    def set_cover_photo(self, user_id: str, event_id: str, photo_id: str) -> Event:
+        """Select an existing event photo as the event's cover image (creator only)."""
+        self._ensure_owner(user_id, event_id)
+        photo = self._photos.get_by_id(photo_id)
+        if photo is None or photo.event_id != event_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Photo not found",
+            )
+        updated = self._events.set_cover_photo(event_id, photo.id)
+        if updated is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Event not found",
+            )
+        logger.info("event cover updated event=%s photo=%s owner=%s", event_id, photo.id, user_id)
+        return updated
+
+    def upload_cover(self, user_id: str, event_id: str, filename: str, data: bytes) -> Event:
+        """Upload a new image and set it as the event's cover image (creator only)."""
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Photo exceeds the 20 MB upload limit",
+            )
+        self._ensure_owner(user_id, event_id)
+        photo = self._store_and_enqueue(user_id, event_id, filename, data)
+        updated = self._events.set_cover_photo(event_id, photo.id)
+        if updated is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Event not found",
+            )
+        logger.info("event cover uploaded event=%s photo=%s owner=%s", event_id, photo.id, user_id)
+        return updated
 
     def _ensure_member(self, user_id: str, event_id: str) -> Event:
         event = self._events.get_by_id(event_id)

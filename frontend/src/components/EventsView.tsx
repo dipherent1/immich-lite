@@ -4,11 +4,12 @@ import Link from "next/link";
 
 import { Icon } from "@/components/ui";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ApiError,
   createEvent,
+  getEventPhotoObjectUrl,
   joinEvent,
   listMyEvents,
   requestToJoin,
@@ -67,6 +68,15 @@ export default function EventsView({ leading }: { leading?: React.ReactNode }) {
   const router = useRouter();
   const [mine, setMine] = useState<EventResponse[] | null>(null);
   const [mineError, setMineError] = useState<string | null>(null);
+  const [coverUrls, setCoverUrls] = useState<Record<string, string>>({});
+  const coverObjectUrlsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    const urls = coverObjectUrlsRef.current;
+    return () => {
+      urls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, []);
 
   // Create
   const [name, setName] = useState("");
@@ -92,7 +102,23 @@ export default function EventsView({ leading }: { leading?: React.ReactNode }) {
 
   const refreshMine = useCallback(() => {
     listMyEvents()
-      .then(setMine)
+      .then((events) => {
+        coverObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+        coverObjectUrlsRef.current = [];
+        setCoverUrls({});
+        setMine(events);
+        for (const ev of events) {
+          if (!ev.cover_photo_id) continue;
+          getEventPhotoObjectUrl(ev.id, ev.cover_photo_id)
+            .then((url) => {
+              coverObjectUrlsRef.current.push(url);
+              setCoverUrls((prev) => ({ ...prev, [ev.id]: url }));
+            })
+            .catch(() => {
+              // Individual cover failing shouldn't break the event list.
+            });
+        }
+      })
       .catch((err) =>
         setMineError(err instanceof ApiError ? err.detail : "Failed to load your events."),
       );
@@ -312,10 +338,20 @@ export default function EventsView({ leading }: { leading?: React.ReactNode }) {
           ) : null}
           {mine?.map((ev) => {
             const t = thumbFor(ev.name);
+            const coverUrl = coverUrls[ev.id];
             return (
               <div key={ev.id} className="event-row">
-                <Link href={`/events/${ev.id}`} className="event-thumb" style={{ background: t.background }}>
-                  {t.letter}
+                <Link
+                  href={`/events/${ev.id}`}
+                  className="event-thumb"
+                  style={coverUrl ? undefined : { background: t.background }}
+                >
+                  {coverUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={coverUrl} alt={`${ev.name} cover`} className="event-thumb-img" />
+                  ) : (
+                    t.letter
+                  )}
                 </Link>
                 <div style={{ minWidth: 0 }}>
                   <div className="row" style={{ gap: 8, flexWrap: "nowrap" }}>

@@ -144,6 +144,8 @@ export interface EventResponse {
   expires_at: string | null;
   created_at: string;
   active: boolean;
+  cover_photo_id: string | null;
+  cover_url: string | null;
 }
 
 export interface EventPublicResponse {
@@ -281,6 +283,30 @@ export async function getEvent(eventId: string): Promise<EventDetailResponse> {
   return request<EventDetailResponse>(
     `/api/v1/events/${encodeURIComponent(eventId)}`,
     { authenticated: true },
+  );
+}
+
+/** Sets an event's cover image to an existing event photo (creator only). */
+export async function setEventCover(
+  eventId: string,
+  photoId: string,
+): Promise<EventResponse> {
+  return request<EventResponse>(
+    `/api/v1/events/${encodeURIComponent(eventId)}/cover`,
+    { method: "PATCH", body: { photo_id: photoId }, authenticated: true },
+  );
+}
+
+/** Uploads a new image and sets it as the event's cover (creator only). */
+export async function uploadEventCover(
+  eventId: string,
+  file: File,
+): Promise<EventResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  return request<EventResponse>(
+    `/api/v1/events/${encodeURIComponent(eventId)}/cover`,
+    { method: "POST", body: form, authenticated: true },
   );
 }
 

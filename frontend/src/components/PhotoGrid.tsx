@@ -6,6 +6,8 @@ import {
   ApiError,
   getEventPhotoObjectUrl,
   getEventPhotos,
+  setEventCover,
+  type EventResponse,
   type PhotoResponse,
 } from "@/lib/api";
 import { Icon } from "@/components/ui";
@@ -32,10 +34,16 @@ interface PageResult {
 export default function PhotoGrid({
   eventId,
   refreshKey = 0,
+  isOwner = false,
+  coverPhotoId = null,
+  onCoverUpdated,
 }: {
   eventId: string;
   /** Bump to reload the first page (e.g. after a new upload). */
   refreshKey?: number;
+  isOwner?: boolean;
+  coverPhotoId?: string | null;
+  onCoverUpdated?: (event: EventResponse) => void;
 }) {
   // `loading` reflects the initial (mount) fetch and starts true.
   const [photos, setPhotos] = useState<PhotoResponse[]>([]);
@@ -45,6 +53,8 @@ export default function PhotoGrid({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [settingCoverId, setSettingCoverId] = useState<string | null>(null);
+  const [coverError, setCoverError] = useState<string | null>(null);
   const objectUrlsRef = useRef<string[]>([]);
 
   useEffect(() => {
@@ -119,6 +129,21 @@ export default function PhotoGrid({
       .finally(() => setLoadingMore(false));
   }
 
+  async function handleSetCover(photoId: string) {
+    setSettingCoverId(photoId);
+    setCoverError(null);
+    try {
+      const updated = await setEventCover(eventId, photoId);
+      onCoverUpdated?.(updated);
+    } catch (err) {
+      setCoverError(
+        err instanceof ApiError ? err.detail : "Could not update cover image.",
+      );
+    } finally {
+      setSettingCoverId(null);
+    }
+  }
+
   const statusLabel: Record<string, string> = {
     pending: "Processing…",
     failed: "Failed to process",
@@ -131,6 +156,11 @@ export default function PhotoGrid({
         {photos.length > 0 && <span className="muted small">{photos.length} loaded</span>}
       </div>
       {error && <p className="alert alert-error">{error}</p>}
+      {coverError && (
+        <p className="alert alert-error" style={{ marginBottom: 14 }}>
+          {coverError}
+        </p>
+      )}
       {loading && !error && (
         <div className="photo-grid">
           {Array.from({ length: 8 }).map((_, i) => (
@@ -151,6 +181,7 @@ export default function PhotoGrid({
           {photos.map((photo) => {
             const url = urls[photo.id];
             const ready = url != null && photo.status === "processed";
+            const isCover = coverPhotoId === photo.id;
             return (
               <div key={photo.id} className="photo">
                 {ready ? (
@@ -161,6 +192,17 @@ export default function PhotoGrid({
                     {photo.status !== "failed" && <span className="spinner" />}
                     {statusLabel[photo.status] ?? "Loading…"}
                   </div>
+                )}
+                {isCover && <span className="photo-cover-badge">Cover</span>}
+                {isOwner && !isCover && url != null && (
+                  <button
+                    type="button"
+                    className="photo-cover-btn"
+                    disabled={settingCoverId === photo.id}
+                    onClick={() => handleSetCover(photo.id)}
+                  >
+                    {settingCoverId === photo.id ? "Saving…" : "Set as cover"}
+                  </button>
                 )}
               </div>
             );

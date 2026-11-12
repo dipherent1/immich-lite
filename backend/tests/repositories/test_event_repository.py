@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from app.repositories.event_repository import EventRepository
+from app.repositories.photo_repository import PhotoRepository
 from app.repositories.user_repository import UserRepository
 
 
@@ -127,3 +128,31 @@ def test_list_for_user_newest_first(db_session):
     first = _create_event(repo, owner.id, name="First", token="tok-a")
     second = _create_event(repo, owner.id, name="Second", token="tok-b")
     assert [e.id for e in repo.list_for_user(owner.id)] == [second.id, first.id]
+
+
+def test_set_cover_photo_if_unset_first_wins(db_session):
+    owner = _make_user(db_session, "owner@example.com")
+    repo = EventRepository(db_session)
+    photos = PhotoRepository(db_session)
+    event = _create_event(repo, owner.id)
+    assert event.cover_photo_id is None
+
+    p1 = photos.create(event_id=event.id, uploader_user_id=owner.id, storage_path="p1.jpg")
+    p2 = photos.create(event_id=event.id, uploader_user_id=owner.id, storage_path="p2.jpg")
+
+    assert repo.set_cover_photo_if_unset(event.id, p1.id) is True
+    assert repo.set_cover_photo_if_unset(event.id, p2.id) is False
+    assert repo.get_by_id(event.id).cover_photo_id == p1.id
+
+
+def test_set_cover_photo_replaces_existing_and_handles_missing(db_session):
+    owner = _make_user(db_session, "owner@example.com")
+    repo = EventRepository(db_session)
+    photos = PhotoRepository(db_session)
+    event = _create_event(repo, owner.id)
+    p1 = photos.create(event_id=event.id, uploader_user_id=owner.id, storage_path="p1.jpg")
+    p2 = photos.create(event_id=event.id, uploader_user_id=owner.id, storage_path="p2.jpg")
+
+    assert repo.set_cover_photo(event.id, p1.id).cover_photo_id == p1.id
+    assert repo.set_cover_photo(event.id, p2.id).cover_photo_id == p2.id
+    assert repo.set_cover_photo("does-not-exist", p1.id) is None
