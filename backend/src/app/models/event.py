@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+import sqlalchemy as sa
 from sqlmodel import Field, SQLModel
 
 
@@ -24,3 +25,16 @@ class Event(SQLModel, table=True):
     starts_at: datetime
     expires_at: datetime | None = None
     created_at: datetime = Field(default_factory=_utcnow)
+    cover_photo_id: str | None = Field(
+        default=None,
+        sa_column=sa.Column(
+            sa.String(),
+            sa.ForeignKey(
+                "photos.id",
+                use_alter=True,
+                name="fk_events_cover_photo_id",
+                ondelete="SET NULL",
+            ),
+            nullable=True,
+        ),
+    )

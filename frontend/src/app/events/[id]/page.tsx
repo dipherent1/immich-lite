@@ -13,9 +13,12 @@ import {
   approveRequest,
   denyRequest,
   getEvent,
+  getEventPhotoObjectUrl,
   listPendingRequests,
+  uploadEventCover,
   uploadEventPhoto,
   type EventDetailResponse,
+  type EventResponse,
   type JoinRequestResponse,
 } from "@/lib/api";
 
@@ -40,12 +43,42 @@ function EventPreviewContent() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [joinRequests, setJoinRequests] = useState<JoinRequestResponse[]>([]);
   const [requestsNote, setRequestsNote] = useState<string | null>(null);
+  const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const [coverUploading, setCoverUploading] = useState(false);
+  const [coverError, setCoverError] = useState<string | null>(null);
+  const coverUrlRef = useRef<string | null>(null);
   const previewUrlsRef = useRef<string[]>([]);
 
   useEffect(() => {
     const urls = previewUrlsRef.current;
-    return () => urls.forEach((url) => URL.revokeObjectURL(url));
+    return () => {
+      urls.forEach((url) => URL.revokeObjectURL(url));
+      if (coverUrlRef.current) URL.revokeObjectURL(coverUrlRef.current);
+    };
   }, []);
+
+  useEffect(() => {
+    const id = event?.id;
+    const coverPhotoId = event?.cover_photo_id;
+    if (!id || !coverPhotoId) return;
+    let cancelled = false;
+    getEventPhotoObjectUrl(id, coverPhotoId)
+      .then((url) => {
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        if (coverUrlRef.current) URL.revokeObjectURL(coverUrlRef.current);
+        coverUrlRef.current = url;
+        setCoverUrl(url);
+      })
+      .catch(() => {
+        // Ignore cover fetch failure; fallback hero gradient remains visible.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [event?.id, event?.cover_photo_id]);
 
   useEffect(() => {
     if (!eventId) return;
@@ -128,14 +161,46 @@ function EventPreviewContent() {
     previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
     previewUrlsRef.current = [];
     setSelected([]);
-    // Reload the grid so the new photos show up (as "pending" then processed).
+    // Reload the grid and event details (first upload sets the default cover).
     setRefreshKey((k) => k + 1);
+    getEvent(eventId)
+      .then(setEvent)
+      .catch(() => {});
     if (failed > 0) {
       setUploadNote(
         `${succeeded} of ${results.length} uploaded; ${failed} failed. Check that each file is an image under 20 MB.`,
       );
     } else {
       setUploadNote(`${results.length} photo${results.length === 1 ? "" : "s"} uploaded.`);
+    }
+  }
+
+  function applyCoverUpdate(updated: EventResponse) {
+    setEvent((prev) =>
+      prev
+        ? {
+            ...prev,
+            cover_photo_id: updated.cover_photo_id,
+            cover_url: updated.cover_url,
+          }
+        : prev,
+    );
+  }
+
+  async function onCoverFileSelected(file: File | null) {
+    if (!file || !eventId) return;
+    setCoverUploading(true);
+    setCoverError(null);
+    try {
+      const updated = await uploadEventCover(eventId, file);
+      applyCoverUpdate(updated);
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      setCoverError(
+        err instanceof ApiError ? err.detail : "Could not upload cover image.",
+      );
+    } finally {
+      setCoverUploading(false);
     }
   }
 
@@ -183,9 +248,24 @@ function EventPreviewContent() {
 
       {event && (
         <>
-          <section className="event-hero grain" style={{ marginTop: 16 }}>
-            <div className="stars" />
-            <div className="row" style={{ justifyContent: "center", position: "relative" }}>
+          <section
+            className={`event-hero grain${coverUrl ? " has-cover" : ""}`}
+            style={{ marginTop: 16 }}
+          >
+            {coverUrl ? (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={coverUrl}
+                  alt={`${event.name} cover`}
+                  className="event-hero-cover"
+                />
+                <div className="event-hero-scrim" />
+              </>
+            ) : (
+              <div className="stars" />
+            )}
+            <div className="row" style={{ justifyContent: "center", position: "relative", zIndex: 2 }}>
               {event.expires_at ? (
                 <span className={`badge ${event.active ? "badge-open" : "badge-closed"}`}>
                   {event.active ? "Open" : "Closed"}
@@ -195,13 +275,42 @@ function EventPreviewContent() {
               )}
               {event.is_owner && <span className="badge">You&apos;re the host</span>}
             </div>
-            <h1 className="display" style={{ position: "relative" }}>
+            <h1 className="display" style={{ position: "relative", zIndex: 2 }}>
               {event.name}
             </h1>
-            <p className="muted" style={{ position: "relative" }}>
+            <p className="muted" style={{ position: "relative", zIndex: 2 }}>
               Starts {fmt(event.starts_at)}
             </p>
+            {event.is_owner && (
+              <label className={`event-hero-edit${coverUploading ? " disabled" : ""}`}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  disabled={coverUploading}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? null;
+                    onCoverFileSelected(file);
+                    e.target.value = "";
+                  }}
+                />
+                {coverUploading ? (
+                  <>
+                    <span className="spinner" /> Updating cover…
+                  </>
+                ) : (
+                  <>
+                    <Icon.Images size={15} /> {coverUrl ? "Change cover" : "Add cover image"}
+                  </>
+                )}
+              </label>
+            )}
           </section>
+
+          {coverError && (
+            <p className="alert alert-error" style={{ marginBottom: 16 }}>
+              {coverError}
+            </p>
+          )}
 
           <div className="facts">
             <div className="fact">
@@ -396,7 +505,13 @@ function EventPreviewContent() {
             </div>
           </div>
 
-          <PhotoGrid eventId={eventId} refreshKey={refreshKey} />
+          <PhotoGrid
+            eventId={eventId}
+            refreshKey={refreshKey}
+            isOwner={event.is_owner}
+            coverPhotoId={event.cover_photo_id}
+            onCoverUpdated={applyCoverUpdate}
+          />
         </>
       )}
     </AppShell>

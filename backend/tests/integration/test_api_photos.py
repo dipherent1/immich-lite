@@ -174,3 +174,105 @@ class TestMatchesFeed:
         body = client.get(f"{API_PREFIX}/matches/me", headers=headers).json()
         assert body["items"] == []
         assert body["has_more"] is False
+
+
+class TestEventCover:
+    def test_first_uploaded_photo_becomes_default_cover(self, client):
+        register_user(client)
+        headers = auth_header(client)
+        event = make_event(client, headers, name="Cover Test").json()
+        assert event["cover_photo_id"] is None
+        assert event["cover_url"] is None
+
+        first = _upload(client, headers, event["id"], filename="first.jpg").json()
+        detail = client.get(f"{API_PREFIX}/events/{event['id']}", headers=headers).json()
+        assert detail["cover_photo_id"] == first["id"]
+        assert detail["cover_url"] == f"/api/v1/events/{event['id']}/photos/{first['id']}/file"
+
+        # Subsequent uploads must not overwrite the default cover.
+        _upload(client, headers, event["id"], filename="second.jpg")
+        detail_after = client.get(f"{API_PREFIX}/events/{event['id']}", headers=headers).json()
+        assert detail_after["cover_photo_id"] == first["id"]
+
+        # Public search results must still exclude private image references.
+        search_items = client.get(
+            f"{API_PREFIX}/events/search", params={"q": "Cover Test"}, headers=headers
+        ).json()
+        assert len(search_items) == 1
+        assert "cover_photo_id" not in search_items[0]
+        assert "cover_url" not in search_items[0]
+
+    def test_creator_can_select_and_upload_cover(self, client):
+        register_user(client)
+        headers = auth_header(client)
+        event = make_event(client, headers, name="Editable Cover").json()
+        first = _upload(client, headers, event["id"], filename="first.jpg").json()
+        second = _upload(client, headers, event["id"], filename="second.jpg").json()
+
+        # Creator picks the second photo as the cover.
+        res = client.patch(
+            f"{API_PREFIX}/events/{event['id']}/cover",
+            json={"photo_id": second["id"]},
+            headers=headers,
+        )
+        assert res.status_code == 200
+        assert res.json()["cover_photo_id"] == second["id"]
+        assert res.json()["cover_url"] == f"/api/v1/events/{event['id']}/photos/{second['id']}/file"
+        assert res.json()["cover_photo_id"] != first["id"]
+
+        # Creator uploads a brand-new cover image directly.
+        custom_bytes = b"\xff\xd8\xff\xe0custom-cover-bytes\xff\xd9"
+        uploaded = client.post(
+            f"{API_PREFIX}/events/{event['id']}/cover",
+            headers=headers,
+            files={"file": ("banner.jpg", custom_bytes, "image/jpeg")},
+        )
+        assert uploaded.status_code == 200
+        new_cover_id = uploaded.json()["cover_photo_id"]
+        assert new_cover_id not in {first["id"], second["id"]}
+
+        fetched = client.get(uploaded.json()["cover_url"], headers=headers)
+        assert fetched.status_code == 200
+        assert fetched.content == custom_bytes
+
+    def test_non_creator_attendee_cannot_edit_cover(self, client):
+        register_user(client)
+        owner_headers = auth_header(client)
+        event = make_event(client, owner_headers).json()
+        first = _upload(client, owner_headers, event["id"], filename="first.jpg").json()
+        second = _upload(client, owner_headers, event["id"], filename="second.jpg").json()
+
+        register_user(client, email="guest@example.com", display_name="Guest")
+        guest_headers = auth_header(client, email="guest@example.com")
+        client.get(f"{API_PREFIX}/events/join/{event['join_token']}", headers=guest_headers)
+
+        patch_res = client.patch(
+            f"{API_PREFIX}/events/{event['id']}/cover",
+            json={"photo_id": second["id"]},
+            headers=guest_headers,
+        )
+        assert patch_res.status_code == 403
+
+        post_res = client.post(
+            f"{API_PREFIX}/events/{event['id']}/cover",
+            headers=guest_headers,
+            files={"file": ("hack.jpg", _JPEG, "image/jpeg")},
+        )
+        assert post_res.status_code == 403
+
+        detail = client.get(f"{API_PREFIX}/events/{event['id']}", headers=owner_headers).json()
+        assert detail["cover_photo_id"] == first["id"]
+
+    def test_set_cover_rejects_photo_from_other_event(self, client):
+        register_user(client)
+        headers = auth_header(client)
+        ev1 = make_event(client, headers, name="Event 1").json()
+        ev2 = make_event(client, headers, name="Event 2").json()
+        other_photo = _upload(client, headers, ev2["id"], filename="other.jpg").json()
+
+        res = client.patch(
+            f"{API_PREFIX}/events/{ev1['id']}/cover",
+            json={"photo_id": other_photo["id"]},
+            headers=headers,
+        )
+        assert res.status_code == 404
