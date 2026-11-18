@@ -151,3 +151,28 @@ def test_list_for_event_scoped_to_event(db_session):
     repo.create(event_id=event_b.id, uploader_user_id=u2.id, storage_path="b1")
     photos, _ = repo.list_for_event(event_a.id)
     assert [p.storage_path for p in photos] == ["a1"]
+
+def test_list_and_count_can_filter_by_status(db_session):
+    user = _make_user(db_session)
+    event = _make_event(db_session, user.id)
+    other = _make_event(db_session, user.id, name="Other", token="tok2")
+    repo = PhotoRepository(db_session)
+    done1 = repo.create(event_id=event.id, uploader_user_id=user.id, storage_path="a")
+    done2 = repo.create(event_id=event.id, uploader_user_id=user.id, storage_path="b")
+    pending = repo.create(event_id=event.id, uploader_user_id=user.id, storage_path="c")
+    failed = repo.create(event_id=event.id, uploader_user_id=user.id, storage_path="d")
+    repo.create(event_id=other.id, uploader_user_id=user.id, storage_path="x")
+    repo.set_status(done1.id, "processed", processed=True)
+    repo.set_status(done2.id, "processed", processed=True)
+    repo.set_status(failed.id, "failed")
+
+    photos, has_more = repo.list_for_event(event.id, status="processed")
+    assert {p.id for p in photos} == {done1.id, done2.id}
+    assert has_more is False
+    assert repo.count_for_event(event.id) == 4
+    assert repo.count_for_event(event.id, status="processed") == 2
+    assert repo.count_for_event(event.id, status="pending") == 1
+    # Unfiltered listing is unchanged (includes pending and failed).
+    assert {p.id for p in repo.list_for_event(event.id)[0]} == {
+        done1.id, done2.id, pending.id, failed.id,
+    }

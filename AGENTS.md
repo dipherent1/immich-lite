@@ -38,7 +38,7 @@ immich-lite/
 │   │   │   ├── deps.py           # DI wiring: get_db, get_*_repository/service, get_current_user
 │   │   │   └── v1/
 │   │   │       ├── api.py        # aggregates all routers under prefix /api/v1
-│   │   │       └── endpoints/    # auth, users, events, join_requests, matches, notifications
+│   │   │       └── endpoints/    # auth, users, events, join_requests, matches, notifications, public
 │   │   ├── core/                 # config, database, security, logging, middleware, metrics,
 │   │   │                         #   vector_db (Qdrant repos), file_storage, jobs, celery_app,
 │   │   │                         #   sse, sse_relay, notification_publisher, worker_metrics
@@ -72,6 +72,13 @@ immich-lite/
 - To later move auth to HttpOnly cookies + a Next.js proxy, change only `lib/api.ts` (base URL becomes relative, token read from a cookie) — application components stay untouched.
 - Protected pages use the `RequireAuth` client guard (`frontend/src/components/RequireAuth.tsx`).
 - SSE notifications are consumed via `frontend/src/lib/notifications.ts` (`useNotifications()` hook, token passed as a query param because `EventSource` can't set headers).
+
+### Public (no-login) event view
+
+- `api/v1/endpoints/public.py` → `PublicEventService` serves `/api/v1/public/events/{join_token}[/photos[/{photo_id}/preview]]` to anyone holding the share link. **The join token is the credential** (128 random bits); there is no session. These are the only unauthenticated photo routes — keep them minimal: no ids in responses, token only (never an event id), only `processed` photos, only ~800px previews (never originals, no zip), 404 unknown token / 410 ended event.
+- Previews are cached at `previews/{event_id}/public-{photo_id}.jpg`, inside the directory `EventExpiryService` already deletes.
+- Rate limiting: these routes have their own per-IP limit (`RATE_LIMIT_PUBLIC`, via `@limiter.limit`) and are exempted from the global limit by `_PUBLIC_PATH_RE` in `core/rate_limit.py` (slowapi's own decorator-skips-global check can't see routes in this FastAPI version, so the global limit would otherwise also count every preview). Add any new public route to that regex *and* give it the decorator.
+- Frontend: logged-out visitors on `/join/<token>` get `PublicEventView` (read-only previews as plain `<img src>`, sticky sign-up bar). Sign-up/log-in links carry `?next=/join/<token>`, so after the face scan (`/onboarding`) the visitor is joined as before.
 
 ### Logging
 

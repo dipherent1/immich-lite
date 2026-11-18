@@ -1,6 +1,14 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, events, join_requests, matches, notifications, users
+from app.api.v1.endpoints import (
+    auth,
+    events,
+    join_requests,
+    matches,
+    notifications,
+    public,
+    users,
+)
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
@@ -9,3 +17,4 @@ api_router.include_router(events.router)
 api_router.include_router(join_requests.router)
 api_router.include_router(matches.router)
 api_router.include_router(notifications.router)
+api_router.include_router(public.router)
