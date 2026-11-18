@@ -30,7 +30,13 @@ export class ApiError extends Error {
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(TOKEN_KEY);
+  try {
+    return window.localStorage.getItem(TOKEN_KEY);
+  } catch {
+    // Storage can be blocked (privacy settings, some in-app browsers, embedded
+    // frames); treat that as "not logged in" so public pages still render.
+    return null;
+  }
 }
 
 function setToken(token: string): void {
@@ -40,7 +46,11 @@ function setToken(token: string): void {
 
 function clearToken(): void {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(TOKEN_KEY);
+  try {
+    window.localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // Nothing stored if storage is blocked.
+  }
 }
 
 export function isAuthenticated(): boolean {
@@ -392,6 +402,45 @@ export async function downloadEventPhotos(
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+// --- Public (no login) event view -------------------------------------------
+// Addressed by the event's share-link token; no Authorization header is sent.
+
+export interface PublicEventView {
+  name: string;
+  /** When the event (and all its photos) is deleted; null for older events. */
+  expires_at: string | null;
+  /** Photos that finished processing. */
+  photo_count: number;
+}
+
+export interface PublicPhotoList {
+  items: { id: string }[];
+  has_more: boolean;
+  next_offset: number;
+}
+
+/** Basic details of an event from its share-link token (no login). */
+export async function getPublicEvent(joinToken: string): Promise<PublicEventView> {
+  return request<PublicEventView>(`/api/v1/public/events/${encodeURIComponent(joinToken)}`);
+}
+
+/** Processed photos of an event, newest first, paginated (no login). */
+export async function getPublicPhotos(
+  joinToken: string,
+  offset = 0,
+  limit = 24,
+): Promise<PublicPhotoList> {
+  return request<PublicPhotoList>(
+    `/api/v1/public/events/${encodeURIComponent(joinToken)}/photos?offset=${offset}&limit=${limit}`,
+  );
+}
+
+/** URL of a small preview (<= 800px) for use directly as an `<img src>`: it
+ *  needs no auth header, so the browser can lazy-load and cache it itself. */
+export function publicPreviewUrl(joinToken: string, photoId: string): string {
+  return `${API_BASE_URL}/api/v1/public/events/${encodeURIComponent(joinToken)}/photos/${encodeURIComponent(photoId)}/preview`;
+}
+
 /** Lists an event's photos, newest first, paginated (members only). */
 export async function getEventPhotos(
   eventId: string,
@@ -421,6 +470,8 @@ export interface MatchFeedItemResponse {
   photo_id: string;
   event_id: string;
   event_name: string;
+  /** When the event (and its photos) is deleted; null for older events. */
+  event_expires_at: string | null;
   similarity: number;
   bbox: { x1: number; y1: number; x2: number; y2: number } | null;
   file_url: string;
@@ -438,11 +489,32 @@ export interface MatchFeedResponse {
 export async function getMyMatches(
   offset = 0,
   limit = 24,
+  eventId?: string,
 ): Promise<MatchFeedResponse> {
+  const event = eventId ? `&event_id=${encodeURIComponent(eventId)}` : "";
   return request<MatchFeedResponse>(
-    `/api/v1/matches/me?offset=${offset}&limit=${limit}`,
+    `/api/v1/matches/me?offset=${offset}&limit=${limit}${event}`,
     { authenticated: true },
   );
+}
+
+/** One "album": an event the user has matched photos in. */
+export interface MatchEventResponse {
+  event_id: string;
+  event_name: string;
+  /** When the event (and its photos) is deleted; null for older events. */
+  event_expires_at: string | null;
+  photo_count: number;
+  cover_photo_id: string;
+}
+
+/** The user's photo albums (events with matched photos), newest event first. */
+export async function getMyMatchEvents(): Promise<MatchEventResponse[]> {
+  const data = await request<{ items: MatchEventResponse[] }>(
+    "/api/v1/matches/me/events",
+    { authenticated: true },
+  );
+  return data.items;
 }
 
 // --- Join requests ---------------------------------------------------------

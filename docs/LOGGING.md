@@ -286,3 +286,25 @@ logger.info("thing happened", extra={"extra_fields": {"photo_id": p.id, "matches
 - Pass non-secret identifiers as `extra_fields` so they land in the JSON.
 - If a new background process needs correlation, mirror the worker pattern
   (`get_current_job()`) or set a `ContextVar` id explicitly.
+
+## Telegram error alerts
+
+`core/alerting.py` sends ERROR-and-above log records (unhandled API exceptions, failed
+Celery tasks) to a Telegram chat. Off by default; enable with `ALERTS_ENABLED=true`,
+`TELEGRAM_ERROR_ALERT_TOKEN` (bot token) and `TELEGRAM_CHAT_ID`. Check with
+`docker compose exec app python -m app.core.alerting status` (or `test` to send one
+message).
+
+Flood protection so Telegram never sees spam:
+
+- Records are queued and sent from a background thread; nothing blocks a request.
+- The same problem (logger + exception type + innermost app frame) alerts once per
+  `ALERT_DEDUPE_SECONDS` (600); the next alert reports `(+N similar suppressed)`.
+- Overall budget `ALERT_MAX_PER_MINUTE` (5) / `ALERT_MAX_PER_HOUR` (30) across all errors.
+- After `ALERT_FLOOD_THRESHOLD` (20) suppressed alerts in one storm, a single
+  "error flood" notice is sent instead of the rest.
+- Sends are spaced >= 1.2s apart; a Telegram 429 pauses everything for its `retry_after`.
+- Counters live in Redis (shared by the API and worker, survive restarts); per-process
+  memory if Redis is down.
+- Messages are scrubbed of tokens, JWTs, share links, emails and DB passwords.
+- `app.request` records are skipped: the unhandled-exception traceback already alerts.

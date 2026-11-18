@@ -194,9 +194,55 @@ class TestMatchesFeed:
         assert items[0]["photo_id"] == photo_id
         assert items[0]["event_id"] == event["id"]
         assert items[0]["event_name"] == "Reunion"
+        assert items[0]["event_expires_at"] is not None  # events now expire (6h rule)
         assert items[0]["similarity"] == 0.85
         assert items[0]["bbox"] == {"x1": 1, "y1": 2, "x2": 3, "y2": 4}
         assert items[0]["file_url"] == f"/api/v1/events/{event['id']}/photos/{photo_id}/file"
+
+    def test_albums_list_events_with_counts_and_event_filter(self, client, db_session):
+        current = register_user(client).json()
+        register_user(client, email="owner@example.com", display_name="Owner")
+        owner_headers = auth_header(client, email="owner@example.com")
+        headers = auth_header(client)
+
+        photo_ids = {}
+        for name in ("Reunion", "Picnic"):
+            event = make_event(client, owner_headers, name=name).json()
+            client.get(f"{API_PREFIX}/events/join/{event['join_token']}", headers=headers)
+            photo_ids[name] = [
+                _upload(client, owner_headers, event["id"], filename=f"{name}{i}.jpg").json()["id"]
+                for i in range(2)
+            ]
+            photo_ids[name + "_event"] = event["id"]
+        for ids in (photo_ids["Reunion"], photo_ids["Picnic"][:1]):
+            for pid in ids:
+                db_session.add(
+                    PhotoMatch(photo_id=pid, user_id=current["id"], similarity=0.9, bbox="{}")
+                )
+        db_session.commit()
+
+        albums = client.get(f"{API_PREFIX}/matches/me/events", headers=headers)
+        assert albums.status_code == 200
+        by_name = {a["event_name"]: a for a in albums.json()["items"]}
+        assert by_name["Reunion"]["photo_count"] == 2
+        assert by_name["Picnic"]["photo_count"] == 1
+        assert by_name["Reunion"]["cover_photo_id"] in photo_ids["Reunion"]
+        assert by_name["Reunion"]["event_expires_at"] is not None
+        assert "id" not in by_name["Reunion"]  # no raw user/internal ids leak
+
+        only = client.get(
+            f"{API_PREFIX}/matches/me",
+            params={"event_id": photo_ids["Reunion_event"]},
+            headers=headers,
+        )
+        assert {i["event_name"] for i in only.json()["items"]} == {"Reunion"}
+        assert len(only.json()["items"]) == 2
+
+    def test_albums_empty_for_user_without_matches(self, client):
+        register_user(client)
+        res = client.get(f"{API_PREFIX}/matches/me/events", headers=auth_header(client))
+        assert res.status_code == 200
+        assert res.json() == {"items": []}
 
     def test_feed_empty_for_user_without_matches(self, client):
         register_user(client)

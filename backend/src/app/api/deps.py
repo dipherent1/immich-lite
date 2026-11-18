@@ -26,6 +26,7 @@ from app.services.matching_service import MatchingService
 from app.services.notification_service import NotificationService
 from app.services.photo_service import PhotoService
 from app.services.profile_service import ProfileService
+from app.services.public_event_service import PublicEventService
 from app.services.user_service import UserService
 
 logger = logging.getLogger("app.auth")
@@ -162,3 +163,11 @@ def get_current_user(
     # Expose the user id to the request-logging middleware.
     request.state.user_id = user.id
     return user
+
+
+def get_public_event_service(
+    events: EventRepository = Depends(get_event_repository),
+    photos: PhotoRepository = Depends(get_photo_repository),
+    files: LocalFileService = Depends(get_file_service),
+) -> PublicEventService:
+    return PublicEventService(events, photos, files)

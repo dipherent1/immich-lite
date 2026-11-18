@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     redis_url: str = os.getenv("REDIS_URL", "memory://")
     # Global limit applied to every route (format: "N/period", period = second|minute|hour).
     rate_limit_global: str = os.getenv("RATE_LIMIT_GLOBAL", "150/minute")
+    # Limit for the unauthenticated public event view (photo previews are CPU work
+    # an anonymous caller can trigger, so it is bounded, but generous enough to
+    # scroll a gallery).
+    rate_limit_public: str = os.getenv("RATE_LIMIT_PUBLIC", "300/minute")
     # Tighter limit for auth endpoints (login, register) to slow brute-force attempts.
     rate_limit_auth: str = os.getenv("RATE_LIMIT_AUTH", "10/minute")
 

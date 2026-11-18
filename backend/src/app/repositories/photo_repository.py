@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from app.models.photo import Photo
 
@@ -66,20 +66,30 @@ class PhotoRepository:
         *,
         offset: int = 0,
         limit: int = 24,
+        status: str | None = None,
     ) -> tuple[list[Photo], bool]:
-        """Paginated list for an event, newest first.
+        """Paginated list for an event, newest first. Pass `status` (e.g.
+        "processed") to see only photos in that state.
 
         Returns (photos, has_more). `limit + 1` is fetched so the caller can tell
         whether another page exists without a separate count query.
         """
+        statement = select(Photo).where(Photo.event_id == event_id)
+        if status is not None:
+            statement = statement.where(Photo.status == status)
         rows = list(
             self._db.scalars(
-                select(Photo)
-                .where(Photo.event_id == event_id)
-                .order_by(Photo.uploaded_at.desc())
+                statement.order_by(Photo.uploaded_at.desc())
                 .offset(offset)
                 .limit(limit + 1)
             )
         )
         has_more = len(rows) > limit
         return rows[:limit], has_more
+
+    def count_for_event(self, event_id: str, status: str | None = None) -> int:
+        """Number of photos in an event, optionally only those in `status`."""
+        statement = select(func.count()).select_from(Photo).where(Photo.event_id == event_id)
+        if status is not None:
+            statement = statement.where(Photo.status == status)
+        return self._db.scalar(statement) or 0

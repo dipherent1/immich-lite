@@ -81,18 +81,24 @@ class PhotoMatchRepository:
         *,
         offset: int = 0,
         limit: int = 24,
+        event_id: str | None = None,
     ) -> tuple[list[tuple[PhotoMatch, Event]], bool]:
         """A user's match feed (match + its event) newest first, 1 query per page.
 
         Joins PhotoMatch -> Photo -> Event so the endpoint has the photo's
         `event_id` and the event's `name` for `file_url`/display without N+1.
+        Pass `event_id` to see only one event's photos.
         """
         statement = (
             select(PhotoMatch, Event)
             .join(Photo, Photo.id == PhotoMatch.photo_id)
             .join(Event, Event.id == Photo.event_id)
             .where(PhotoMatch.user_id == user_id)
-            .order_by(PhotoMatch.created_at.desc())
+        )
+        if event_id is not None:
+            statement = statement.where(Event.id == event_id)
+        statement = (
+            statement.order_by(PhotoMatch.created_at.desc())
             .offset(offset)
             .limit(limit + 1)
         )
@@ -100,3 +106,22 @@ class PhotoMatchRepository:
         rows = [tuple(row) for row in result.all()]
         has_more = len(rows) > limit
         return rows[:limit], has_more
+
+    def list_event_summaries(self, user_id: str) -> list[tuple[Event, int, str]]:
+        """One row per event the user has matched photos in: (event, photo count,
+        most recent matched photo id, used as the album cover). Newest event
+        first. Only light columns are read; a user has few matches (events are
+        short-lived), so grouping happens here rather than with dialect-specific SQL.
+        """
+        statement = (
+            select(Event, PhotoMatch.photo_id)
+            .join(Photo, Photo.event_id == Event.id)
+            .join(PhotoMatch, PhotoMatch.photo_id == Photo.id)
+            .where(PhotoMatch.user_id == user_id)
+            .order_by(Event.created_at.desc(), Event.id, PhotoMatch.created_at.desc())
+        )
+        summaries: dict[str, list] = {}
+        for event, photo_id in self._db.execute(statement).all():
+            entry = summaries.setdefault(event.id, [event, 0, photo_id])
+            entry[1] += 1
+        return [(e, n, cover) for e, n, cover in summaries.values()]

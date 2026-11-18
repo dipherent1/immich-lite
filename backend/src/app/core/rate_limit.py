@@ -37,6 +37,15 @@ _EXEMPT_PATHS = {"/ping", "/metrics"}
 # counting them against the global per-IP budget throttles normal browsing.
 _EXEMPT_PATH_RE = re.compile(r"^/api/v1/events/[^/]+/photos/[^/]+/file$")
 
+# The public (no-login) event view has its own, higher per-IP limit
+# (RATE_LIMIT_PUBLIC, enforced by the @limiter.limit decorators on those routes),
+# so the global limit must not also count them or scrolling a gallery of previews
+# would trip it. Only the exact public route shapes are matched, so probing other
+# /api/v1/public/... paths is still throttled globally. (slowapi's own "route has
+# a decorator, skip the global limit" check can't see routes in this FastAPI
+# version, hence the explicit pattern.)
+_PUBLIC_PATH_RE = re.compile(r"^/api/v1/public/events/[^/]+(/photos(/[^/]+/preview)?)?$")
+
 
 def _client_ip(request: Request) -> str:
     """Return the real client IP without trusting spoofable client headers.
@@ -142,7 +151,8 @@ class RateLimitMiddleware:
             return
 
         request = Request(scope, receive=receive, send=send)
-        if request.url.path in _EXEMPT_PATHS or _EXEMPT_PATH_RE.match(request.url.path):
+        path = request.url.path
+        if path in _EXEMPT_PATHS or _EXEMPT_PATH_RE.match(path) or _PUBLIC_PATH_RE.match(path):
             await self.app(scope, receive, send)
             return
 
