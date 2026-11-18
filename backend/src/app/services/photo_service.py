@@ -55,15 +55,16 @@ def _is_image(data: bytes) -> bool:
         return False
 
 
-def _to_preview_jpeg(data: bytes) -> bytes:
-    """Decode any supported image (incl. HEIC) to an upright, display-sized JPEG."""
+def _to_preview_jpeg(data: bytes, max_px: int = _PREVIEW_MAX_PX) -> bytes:
+    """Decode any supported image (incl. HEIC) to an upright JPEG whose longest
+    side is at most `max_px` (default: display size)."""
     from PIL import Image, ImageOps
     from pillow_heif import register_heif_opener
 
     register_heif_opener()
     with Image.open(io.BytesIO(data)) as img:
         img = ImageOps.exif_transpose(img).convert("RGB")
-        img.thumbnail((_PREVIEW_MAX_PX, _PREVIEW_MAX_PX))
+        img.thumbnail((max_px, max_px))
         out = io.BytesIO()
         img.save(out, "JPEG", quality=85)
         return out.getvalue()
