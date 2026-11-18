@@ -178,3 +178,59 @@ def test_bbox_dict_property(db_session):
 def test_bbox_dict_property_invalid_json(db_session):
     match = PhotoMatch(photo_id="p", user_id="u", similarity=0.5, bbox="not json")
     assert match.bbox_dict == {}
+
+
+def _two_events(db_session):
+    user, other, old_event, o1, o2 = _seed(db_session)
+    now = datetime.now(timezone.utc)
+    new_event = EventRepository(db_session).create_event(
+        owner_id=user.id,
+        name="Newer",
+        join_token="tok2",
+        starts_at=now,
+        expires_at=now + timedelta(hours=6),
+    )
+    new_event.created_at = old_event.created_at + timedelta(minutes=5)
+    db_session.add(new_event)
+    db_session.commit()
+    n1 = PhotoRepository(db_session).create(
+        event_id=new_event.id, uploader_user_id=user.id, storage_path="n1.jpg"
+    )
+    for photo, day in ((o1, 1), (n1, 2), (o2, 3)):
+        db_session.add(
+            PhotoMatch(
+                photo_id=photo.id,
+                user_id=user.id,
+                similarity=0.8,
+                bbox="{}",
+                created_at=datetime(2026, 1, day, tzinfo=timezone.utc),
+            )
+        )
+    db_session.commit()
+    return user, old_event, new_event, o1, o2, n1
+
+
+def test_list_feed_can_filter_to_one_event(db_session):
+    user, old_event, new_event, o1, o2, n1 = _two_events(db_session)
+    repo = PhotoMatchRepository(db_session)
+    feed, _ = repo.list_feed_for_user(user.id, event_id=old_event.id)
+    assert [m.photo_id for m, _ in feed] == [o2.id, o1.id]
+    feed, _ = repo.list_feed_for_user(user.id, event_id=new_event.id)
+    assert [m.photo_id for m, _ in feed] == [n1.id]
+
+
+def test_event_summaries_count_photos_and_pick_latest_cover(db_session):
+    user, old_event, new_event, o1, o2, n1 = _two_events(db_session)
+    summaries = PhotoMatchRepository(db_session).list_event_summaries(user.id)
+    # Newest event first; cover is the most recently matched photo of that event.
+    assert [(e.name, count, cover) for e, count, cover in summaries] == [
+        ("Newer", 1, n1.id),
+        ("Party", 2, o2.id),
+    ]
+
+
+def test_event_summaries_ignore_other_users_matches(db_session):
+    user, other, event, p1, p2 = _seed(db_session)
+    db_session.add(PhotoMatch(photo_id=p1.id, user_id=other.id, similarity=0.9, bbox="{}"))
+    db_session.commit()
+    assert PhotoMatchRepository(db_session).list_event_summaries(user.id) == []
