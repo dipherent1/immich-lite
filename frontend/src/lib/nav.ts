@@ -36,3 +36,9 @@ export function initials(name: string): string {
       .join("") || "?"
   );
 }
+
+/** "My Party" -> "My Party-photos.zip" (strips characters unsafe in file names). */
+export function zipName(eventName: string): string {
+  const safe = eventName.replace(/[^\w\- ]+/g, "").trim() || "event";
+  return `${safe}-photos.zip`;
+}

@@ -1,8 +1,9 @@
 "use client";
 
 import AppShell from "@/components/AppShell";
-import MatchesGrid from "@/components/MatchesGrid";
+import MatchAlbums from "@/components/MatchAlbums";
 import RequireAuth from "@/components/RequireAuth";
+import { EVENT_LIFETIME_HOURS } from "@/lib/lifetime";
 
 function MatchesContent() {
   return (
@@ -14,11 +15,12 @@ function MatchesContent() {
             Photos that <span className="accent-text">found you</span>
           </h1>
           <p className="muted" style={{ marginTop: 8 }}>
-            Shots from events you attended where your face was recognised.
+            One album per event. Open one to see your photos and download them. Events are
+            deleted {EVENT_LIFETIME_HOURS} hours after they&apos;re created, photos included.
           </p>
         </div>
       </div>
-      <MatchesGrid />
+      <MatchAlbums />
     </AppShell>
   );
 }
