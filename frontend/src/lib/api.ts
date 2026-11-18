@@ -30,7 +30,13 @@ export class ApiError extends Error {
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(TOKEN_KEY);
+  try {
+    return window.localStorage.getItem(TOKEN_KEY);
+  } catch {
+    // Storage can be blocked (privacy settings, some in-app browsers, embedded
+    // frames); treat that as "not logged in" so public pages still render.
+    return null;
+  }
 }
 
 function setToken(token: string): void {
@@ -40,7 +46,11 @@ function setToken(token: string): void {
 
 function clearToken(): void {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(TOKEN_KEY);
+  try {
+    window.localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // Nothing stored if storage is blocked.
+  }
 }
 
 export function isAuthenticated(): boolean {
@@ -390,6 +400,45 @@ export async function downloadEventPhotos(
   a.remove();
   // Give the browser a moment to start the save before freeing the blob.
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+// --- Public (no login) event view -------------------------------------------
+// Addressed by the event's share-link token; no Authorization header is sent.
+
+export interface PublicEventView {
+  name: string;
+  /** When the event (and all its photos) is deleted; null for older events. */
+  expires_at: string | null;
+  /** Photos that finished processing. */
+  photo_count: number;
+}
+
+export interface PublicPhotoList {
+  items: { id: string }[];
+  has_more: boolean;
+  next_offset: number;
+}
+
+/** Basic details of an event from its share-link token (no login). */
+export async function getPublicEvent(joinToken: string): Promise<PublicEventView> {
+  return request<PublicEventView>(`/api/v1/public/events/${encodeURIComponent(joinToken)}`);
+}
+
+/** Processed photos of an event, newest first, paginated (no login). */
+export async function getPublicPhotos(
+  joinToken: string,
+  offset = 0,
+  limit = 24,
+): Promise<PublicPhotoList> {
+  return request<PublicPhotoList>(
+    `/api/v1/public/events/${encodeURIComponent(joinToken)}/photos?offset=${offset}&limit=${limit}`,
+  );
+}
+
+/** URL of a small preview (<= 800px) for use directly as an `<img src>`: it
+ *  needs no auth header, so the browser can lazy-load and cache it itself. */
+export function publicPreviewUrl(joinToken: string, photoId: string): string {
+  return `${API_BASE_URL}/api/v1/public/events/${encodeURIComponent(joinToken)}/photos/${encodeURIComponent(photoId)}/preview`;
 }
 
 /** Lists an event's photos, newest first, paginated (members only). */

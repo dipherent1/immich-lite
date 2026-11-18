@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore } from "react";
 
+import PublicEventView from "@/components/PublicEventView";
 import { Brand, Icon } from "@/components/ui";
 import { ApiError, isAuthenticated, joinEvent } from "@/lib/api";
-import { EVENT_LIFETIME_HOURS } from "@/lib/lifetime";
 
 function subscribe() {
   return () => {};
@@ -15,9 +15,10 @@ function subscribe() {
 /**
  * Shareable join landing page: /join/<token>.
  *
- * - If the visitor isn't logged in they're pointed to the login page (which
- *   returns them here via the ?next= param).
- * - Otherwise it joins the event by token and redirects to the event preview.
+ * - Logged out: shows the event's photos as small previews (no account needed)
+ *   with a call-to-action to sign up / log in so they get matched. Both links
+ *   return here via ?next= and, after the face scan, the visitor is joined.
+ * - Logged in: joins the event by token and redirects to the event page.
  * - On error, shows the message with a link back to the dashboard.
  *
  * Auth state is read via useSyncExternalStore so the server-rendered HTML and
@@ -50,7 +51,9 @@ export default function JoinPage() {
       });
   }, [authed, token, router]);
 
-  const loginHref = `/login?next=${encodeURIComponent(`/join/${token}`)}`;
+  if (authed === false && token) {
+    return <PublicEventView token={token} />;
+  }
 
   return (
     <main className="center-page grain">
@@ -70,35 +73,11 @@ export default function JoinPage() {
       <div className="center-card card">
         <Brand />
         <span className={`scan-ring ${error ? "error" : "missing"}`} style={{ marginTop: 8 }}>
-          {error ? <Icon.X size={30} /> : authed === false ? <Icon.Ticket size={30} /> : <span className="spinner" />}
+          {error ? <Icon.X size={30} /> : <span className="spinner" />}
         </span>
         <h1 className="h1" style={{ fontSize: "1.8rem" }}>
-          {error ? "Couldn't join" : authed === false ? "You're invited" : "Joining event…"}
+          {error ? "Couldn't join" : "Joining event…"}
         </h1>
-
-        {authed === false && (
-          <>
-            <p className="muted">
-              Create an account and scan your face once — every photo you&apos;re in at this
-              event comes straight to you.
-            </p>
-            <p className="muted small">
-              Events are deleted {EVENT_LIFETIME_HOURS} hours after they&apos;re created, so grab
-              your photos before then.
-            </p>
-            <div className="row" style={{ justifyContent: "center", marginTop: 4 }}>
-              <Link
-                href={`/register?next=${encodeURIComponent(`/join/${token}`)}`}
-                className="btn btn-primary"
-              >
-                Create account
-              </Link>
-              <Link href={loginHref} className="btn">
-                I have an account
-              </Link>
-            </div>
-          </>
-        )}
 
         {busy && authed && !error ? <p className="muted">Hang tight, adding you to the guest list.</p> : null}
 
