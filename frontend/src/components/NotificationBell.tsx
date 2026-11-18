@@ -53,7 +53,7 @@ function iconTone(type: string): React.CSSProperties {
 
 function subjectHref(n: NotificationResponse): string {
   // "You were found in a photo" → your gallery is the useful destination.
-  if (n.type === "photo_matched") return "/matches";
+  if (n.type === "photo_matched") return n.subject_id ? `/matches/${n.subject_id}` : "/matches";
   // Join requests / approvals / processed uploads all carry the event id.
   if (n.subject_type === "event" && n.subject_id) return `/events/${n.subject_id}`;
   return "/dashboard";

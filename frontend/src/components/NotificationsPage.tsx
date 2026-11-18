@@ -52,7 +52,7 @@ function iconTone(type: string): React.CSSProperties {
 }
 
 function subjectHref(n: NotificationResponse): string {
-  if (n.type === "photo_matched") return "/matches";
+  if (n.type === "photo_matched") return n.subject_id ? `/matches/${n.subject_id}` : "/matches";
   if (n.subject_type === "event" && n.subject_id) return `/events/${n.subject_id}`;
   if (n.subject_type === "photo" && n.subject_id) return `/matches`;
   return "/dashboard";

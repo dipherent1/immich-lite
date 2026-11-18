@@ -3086,5 +3086,146 @@ a.tile:hover {
   .public-cta-actions .btn {
     flex: 1;
     min-height: 44px;
+
+/* ---------- Gallery albums ---------- */
+
+.album-alerts {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.album-alerts .expiry-banner {
+  margin-bottom: 0;
+}
+
+.album-card .event-cover {
+  position: relative;
+}
+
+.album-card .event-card-body {
+  align-items: flex-start;
+}
+
+.album-count {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.album-meta {
+  margin-top: 6px;
+}
+
+.album-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.album-head .h1 {
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+
+.album-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.expiry-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.expiry-chip.urgent {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* ==========================================================================
+   Mobile fixes (found in a 375px review)
+   ========================================================================== */
+
+/* Grid children default to min-width:auto, so a long unbreakable child (the
+   invite link) stretched the single column to 565px and clipped the event page. */
+.grid-2 > *,
+.grid-dash > *,
+.stack,
+.card {
+  min-width: 0;
+}
+
+@media (max-width: 920px) {
+  .grid-2,
+  .grid-dash {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.input-group {
+  min-width: 0;
+}
+
+/* Notification dropdown: anchored to the bell it ran off the left edge of a
+   phone. On small screens pin it to the viewport instead. */
+@media (max-width: 720px) {
+  .notif-pop {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    top: 68px;
+    width: auto;
+    max-height: calc(100vh - 160px);
+  }
+  .menu-pop {
+    position: fixed;
+    right: 12px;
+    top: 68px;
+    width: min(260px, calc(100vw - 24px));
+  }
+}
+
+/* Comfortable tap targets (>= 40px tall) for text-only links/buttons. */
+@media (max-width: 720px) {
+  .back-link {
+    min-height: 40px;
+  }
+  .link-btn {
+    min-height: 40px;
+    padding: 0 12px;
+  }
+  .auth-switch a {
+    display: inline-block;
+    padding: 10px 6px;
+  }
+  .event-card-body .event-name {
+    padding: 4px 0;
+  }
+  .photo-cover-btn {
+    opacity: 1;
+    padding: 8px 12px;
+  }
+  .btn-sm {
+    min-height: 40px;
   }
 }

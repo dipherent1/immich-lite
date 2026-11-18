@@ -163,6 +163,17 @@ class MatchingService:
         *,
         offset: int = 0,
         limit: int = 24,
+        event_id: str | None = None,
     ) -> tuple[list[tuple[PhotoMatch, Event]], bool]:
-        """A user's matched-photo delivery feed, newest first (owner only)."""
-        return self._matches.list_feed_for_user(user_id, offset=offset, limit=limit)
+        """A user's matched-photo delivery feed, newest first (owner only),
+        optionally limited to one event."""
+        if event_id is None:
+            return self._matches.list_feed_for_user(user_id, offset=offset, limit=limit)
+        return self._matches.list_feed_for_user(
+            user_id, offset=offset, limit=limit, event_id=event_id
+        )
+
+    def event_summaries(self, user_id: str) -> list[tuple[Event, int, str]]:
+        """The user's "albums": each event they have matched photos in, with the
+        photo count and a cover photo id."""
+        return self._matches.list_event_summaries(user_id)

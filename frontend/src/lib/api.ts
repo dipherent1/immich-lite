@@ -470,6 +470,8 @@ export interface MatchFeedItemResponse {
   photo_id: string;
   event_id: string;
   event_name: string;
+  /** When the event (and its photos) is deleted; null for older events. */
+  event_expires_at: string | null;
   similarity: number;
   bbox: { x1: number; y1: number; x2: number; y2: number } | null;
   file_url: string;
@@ -487,11 +489,32 @@ export interface MatchFeedResponse {
 export async function getMyMatches(
   offset = 0,
   limit = 24,
+  eventId?: string,
 ): Promise<MatchFeedResponse> {
+  const event = eventId ? `&event_id=${encodeURIComponent(eventId)}` : "";
   return request<MatchFeedResponse>(
-    `/api/v1/matches/me?offset=${offset}&limit=${limit}`,
+    `/api/v1/matches/me?offset=${offset}&limit=${limit}${event}`,
     { authenticated: true },
   );
+}
+
+/** One "album": an event the user has matched photos in. */
+export interface MatchEventResponse {
+  event_id: string;
+  event_name: string;
+  /** When the event (and its photos) is deleted; null for older events. */
+  event_expires_at: string | null;
+  photo_count: number;
+  cover_photo_id: string;
+}
+
+/** The user's photo albums (events with matched photos), newest event first. */
+export async function getMyMatchEvents(): Promise<MatchEventResponse[]> {
+  const data = await request<{ items: MatchEventResponse[] }>(
+    "/api/v1/matches/me/events",
+    { authenticated: true },
+  );
+  return data.items;
 }
 
 // --- Join requests ---------------------------------------------------------
