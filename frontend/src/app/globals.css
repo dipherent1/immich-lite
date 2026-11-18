@@ -3086,6 +3086,8 @@ a.tile:hover {
   .public-cta-actions .btn {
     flex: 1;
     min-height: 44px;
+  }
+}
 
 /* ---------- Gallery albums ---------- */
 
