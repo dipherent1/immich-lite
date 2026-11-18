@@ -11,7 +11,7 @@ import logging
 import os
 
 from celery import Celery
-from celery.signals import worker_ready
+from celery.signals import after_setup_logger, after_setup_task_logger, worker_ready
 
 from app.core.config import get_settings
 
@@ -55,6 +55,20 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
 )
+
+
+@after_setup_logger.connect
+@after_setup_task_logger.connect
+def _install_error_alerts(**_kwargs) -> None:
+    """Celery replaces the root logger's handlers when the worker starts, so the
+    Telegram alert handler is (re)attached here. Failed tasks are logged at ERROR
+    by Celery and so become alerts. Idempotent; a no-op unless alerts are enabled."""
+    try:
+        from app.core.alerting import install_alert_handler
+
+        install_alert_handler()
+    except Exception:
+        logger.warning("could not set up error alerts", exc_info=True)
 
 
 @worker_ready.connect

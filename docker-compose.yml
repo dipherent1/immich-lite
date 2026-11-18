@@ -83,6 +83,11 @@ services:
       - RATE_LIMIT_GLOBAL=${RATE_LIMIT_GLOBAL:-150/minute}
       - RATE_LIMIT_AUTH=${RATE_LIMIT_AUTH:-10/minute}
       - RATE_LIMIT_PUBLIC=${RATE_LIMIT_PUBLIC:-300/minute}
+      - ALERTS_ENABLED=${ALERTS_ENABLED:-false}
+      - TELEGRAM_ERROR_ALERT_TOKEN=${TELEGRAM_ERROR_ALERT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - ALERT_ENVIRONMENT=${ALERT_ENVIRONMENT:-local}
+      - ALERT_SERVICE=api
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -113,12 +118,20 @@ services:
       - MODEL_NAME=${MODEL_NAME:-buffalo_s}
       - OUTPUT_ROOT=${OUTPUT_ROOT:-/app/output}
       - CELERY_CONCURRENCY=${CELERY_CONCURRENCY:-1}
+      - REDIS_URL=redis://redis:6379/0
+      - ALERTS_ENABLED=${ALERTS_ENABLED:-false}
+      - TELEGRAM_ERROR_ALERT_TOKEN=${TELEGRAM_ERROR_ALERT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - ALERT_ENVIRONMENT=${ALERT_ENVIRONMENT:-local}
+      - ALERT_SERVICE=worker
     depends_on:
       qdrant:
         condition: service_started
       postgres:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - app-network
