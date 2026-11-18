@@ -155,6 +155,14 @@ def setup_logging() -> logging.Logger:
                 exc_info=True,
             )
 
+    # Optional Telegram error alerts (no-op unless ALERTS_ENABLED + token + chat id).
+    try:
+        from app.core.alerting import install_alert_handler
+
+        install_alert_handler(root)
+    except Exception:  # alerting must never stop the app from starting
+        logging.getLogger(__name__).warning("could not set up error alerts", exc_info=True)
+
     return logging.getLogger("app")
 
 
